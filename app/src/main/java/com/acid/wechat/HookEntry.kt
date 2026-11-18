@@ -12,6 +12,7 @@ import com.acid.wechat.core.WcdbBridge
 import com.acid.wechat.debug.DebugServer
 import com.acid.wechat.features.AntiMomentsPostFeature
 import com.acid.wechat.features.AntiRecallFeature
+import com.acid.wechat.features.AutoVoiceTransFeature
 import com.acid.wechat.features.CustomGameEmojiFeature
 import com.acid.wechat.features.FakeSnsCommentFeature
 import com.acid.wechat.features.FakeSnsLikeFeature
@@ -105,6 +106,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             WeChatSender.registerDexRules()
             FeatureRegistry.register(AntiRecallFeature)
             FeatureRegistry.register(CustomGameEmojiFeature)
+            FeatureRegistry.register(AutoVoiceTransFeature)
             FeatureRegistry.register(AntiMomentsPostFeature)
             FeatureRegistry.register(FakeSnsLikeFeature)
             FeatureRegistry.register(FakeSnsCommentFeature)

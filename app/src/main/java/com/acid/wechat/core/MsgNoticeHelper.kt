@@ -19,6 +19,11 @@ object MsgNoticeHelper {
     @Volatile
     private var capturedMsgInfoStorage: Any? = null
 
+    fun getCapturedStorage(): Any? = capturedMsgInfoStorage
+
+    fun resolveMsgInfoClass(): Class<*>? =
+        if (::ruleMsgInfo.isInitialized) ruleMsgInfo.resolveClass() else null
+
     fun registerDexRules() {
         ruleMsgInfo = DexKitLocator.registerClass(
             id = "msg_info_class",

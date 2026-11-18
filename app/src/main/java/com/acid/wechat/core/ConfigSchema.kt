@@ -151,6 +151,20 @@ object ConfigSchema {
         "custom_dice", true, FeatureCategory.CHAT, "动画表情", "自定义骰子",
         "发送骰子前弹出自定义选择窗",
     ))
+    val AUTO_VOICE_TRANS = register(BoolSpec(
+        "auto_voice_trans", true, FeatureCategory.CHAT, "语音增强", "自动语音转文字",
+        "收到他人语音下载完成后自动转写为文字，仅转写他人发送的语音",
+    ))
+    val AUTO_VOICE_TRANS_EXPAND = register(BoolSpec(
+        "auto_voice_trans_expand", true, FeatureCategory.CHAT, "语音增强", "自动展开转写结果",
+        "转写完成后直接在语音气泡下方展开文字，关闭则仅后台静默预转写",
+        dependsOn = AUTO_VOICE_TRANS.key,
+    ))
+    val AUTO_VOICE_CLEAR_REDDOT = register(BoolSpec(
+        "auto_voice_clear_reddot", true, FeatureCategory.CHAT, "语音增强", "自动去除语音红点",
+        "自动转写他人语音后标记语音已读，去除气泡旁未听红点",
+        dependsOn = AUTO_VOICE_TRANS.key,
+    ))
     val ANTI_MOMENTS_DELETE = register(BoolSpec(
         "anti_moments_delete", true, FeatureCategory.MOMENTS, "防删除", "朋友圈防删除",
         "拦截好友删除朋友圈并添加自定义前缀",

@@ -44,6 +44,54 @@ object ChatRepository {
     fun queryMessageBySvrId(msgSvrId: Long): ContentValues? =
         queryMessageRow("msgSvrId = ?", arrayOf(msgSvrId.toString()))
 
+    data class VoiceMsgRow(
+        val msgId: Long,
+        val msgSvrId: Long,
+        val isSend: Int,
+        val type: Int,
+        val talker: String,
+        val flag: Int,
+        val imgPath: String,
+    )
+
+    fun queryVoiceMessageByMsgId(msgId: Long): VoiceMsgRow? = runCatching {
+        val cursor = WcdbBridge.rawQuery(
+            "SELECT msgId, msgSvrId, isSend, type, talker, flag, imgPath FROM message WHERE msgId = ? AND type = 34 LIMIT 1",
+            arrayOf(msgId.toString()),
+        ) ?: return@runCatching null
+        cursor.use { c ->
+            if (!c.moveToFirst()) null else VoiceMsgRow(
+                msgId = c.getLong(0),
+                msgSvrId = c.getLong(1),
+                isSend = c.getInt(2),
+                type = c.getInt(3),
+                talker = c.getString(4).orEmpty(),
+                flag = c.getInt(5),
+                imgPath = c.getString(6).orEmpty(),
+            )
+        }
+    }.getOrNull()
+
+    fun queryVoiceFileName(msgId: Long, msgSvrId: Long): String? = runCatching {
+        val cursor = WcdbBridge.rawQuery(
+            "SELECT FileName FROM voiceinfo WHERE MsgLocalId = ? OR (? > 0 AND MsgId = ?) LIMIT 1",
+            arrayOf(msgId.toString(), msgSvrId.toString(), msgSvrId.toString()),
+        ) ?: return@runCatching null
+        cursor.use { c ->
+            if (c.moveToFirst()) c.getString(0)?.takeIf { it.isNotBlank() } else null
+        }
+    }.getOrNull()
+
+    fun hasVoiceTranscript(msgId: Long, fileName: String): Boolean = runCatching {
+        val cursor = WcdbBridge.rawQuery(
+            "SELECT content FROM VoiceTransText WHERE cmsgId = ? OR msgId = ? LIMIT 1",
+            arrayOf(fileName, msgId.toString()),
+        ) ?: return@runCatching false
+        cursor.use { c ->
+            c.moveToFirst() && !c.getString(0).isNullOrBlank()
+        }
+    }.getOrDefault(false)
+
     fun queryMessageById(msgId: Long): ContentValues? =
         queryMessageRow("msgId = ?", arrayOf(msgId.toString()))
 
