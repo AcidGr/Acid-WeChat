@@ -9,6 +9,7 @@ import com.acid.wechat.core.ConfigStore
 import com.acid.wechat.core.FeatureOption
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.wechat.ChatRepository
+import com.acid.wechat.wechat.VoiceNotifyBridge
 import com.acid.wechat.wechat.VoiceTransBridge
 import org.json.JSONObject
 import java.util.Collections
@@ -33,6 +34,7 @@ object AutoVoiceTransFeature : AcidFeature {
     override fun extraOptions(): List<FeatureOption> = listOf(
         FeatureOption.from(ConfigSchema.AUTO_VOICE_TRANS_EXPAND),
         FeatureOption.from(ConfigSchema.AUTO_VOICE_CLEAR_REDDOT),
+        FeatureOption.from(ConfigSchema.AUTO_VOICE_NOTIFY_TRANS),
     )
 
     private val worker = Executors.newSingleThreadScheduledExecutor { r ->
@@ -61,6 +63,7 @@ object AutoVoiceTransFeature : AcidFeature {
 
     override fun registerDexRules() {
         VoiceTransBridge.registerDexRules()
+        VoiceNotifyBridge.registerDexRules()
     }
 
     override fun onInit() {
@@ -77,6 +80,9 @@ object AutoVoiceTransFeature : AcidFeature {
                 }
             },
         )
+        VoiceNotifyBridge.init {
+            FeatureRegistry.isEnabled(this) && ConfigStore.isEffective(ConfigSchema.AUTO_VOICE_NOTIFY_TRANS)
+        }
     }
 
     private fun shouldForceExpandUi(msgId: Long): Boolean {
@@ -109,9 +115,11 @@ object AutoVoiceTransFeature : AcidFeature {
         }
         if (!trackedMsgIds.add(msgId)) return
 
-        if (ChatRepository.hasVoiceTranscript(msgId, fileName)) {
+        val cachedText = ChatRepository.queryVoiceTranscript(msgId, fileName)
+        if (!cachedText.isNullOrBlank()) {
             transcribedCount.incrementAndGet()
             FeatureRegistry.recordHit(id)
+            VoiceNotifyBridge.onTranscriptReady(msgId, cachedText)
             applyPostTransActions(msgId, fileName)
             return
         }
@@ -146,9 +154,11 @@ object AutoVoiceTransFeature : AcidFeature {
                     FeatureRegistry.recordHit(id)
                     cachedTranscriptCheck[task.msgId] = true
                     AcidLogger.i(TAG, "transcribed msgId=${task.msgId} talker=${task.talker} len=${text.length}")
+                    VoiceNotifyBridge.onTranscriptReady(task.msgId, text)
                     applyPostTransActions(task.msgId, task.fileName)
                 } else {
                     failedCount.incrementAndGet()
+                    VoiceNotifyBridge.onTranscriptFailed(task.msgId)
                     AcidLogger.w(TAG, "empty transcript msgId=${task.msgId} status=$status")
                 }
             }

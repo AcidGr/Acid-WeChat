@@ -165,6 +165,11 @@ object ConfigSchema {
         "自动转写他人语音后标记语音已读，去除气泡旁未听红点",
         dependsOn = AUTO_VOICE_TRANS.key,
     ))
+    val AUTO_VOICE_NOTIFY_TRANS = register(BoolSpec(
+        "auto_voice_notify_trans", true, FeatureCategory.CHAT, "语音增强", "语音通知转文字",
+        "后台收到他人语音通知时等待短时转写并直接显示文字",
+        dependsOn = AUTO_VOICE_TRANS.key,
+    ))
     val ANTI_MOMENTS_DELETE = register(BoolSpec(
         "anti_moments_delete", true, FeatureCategory.MOMENTS, "防删除", "朋友圈防删除",
         "拦截好友删除朋友圈并添加自定义前缀",

@@ -82,15 +82,18 @@ object ChatRepository {
         }
     }.getOrNull()
 
-    fun hasVoiceTranscript(msgId: Long, fileName: String): Boolean = runCatching {
+    fun queryVoiceTranscript(msgId: Long, fileName: String): String? = runCatching {
         val cursor = WcdbBridge.rawQuery(
             "SELECT content FROM VoiceTransText WHERE cmsgId = ? OR msgId = ? LIMIT 1",
             arrayOf(fileName, msgId.toString()),
-        ) ?: return@runCatching false
+        ) ?: return@runCatching null
         cursor.use { c ->
-            c.moveToFirst() && !c.getString(0).isNullOrBlank()
+            if (c.moveToFirst()) c.getString(0)?.takeIf { it.isNotBlank() } else null
         }
-    }.getOrDefault(false)
+    }.getOrNull()
+
+    fun hasVoiceTranscript(msgId: Long, fileName: String): Boolean =
+        queryVoiceTranscript(msgId, fileName) != null
 
     fun queryMessageById(msgId: Long): ContentValues? =
         queryMessageRow("msgId = ?", arrayOf(msgId.toString()))
