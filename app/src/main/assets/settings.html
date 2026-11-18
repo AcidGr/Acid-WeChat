@@ -267,6 +267,57 @@
   .tool-btn:active {
     background: #F3F4F6;
   }
+  .agent-card {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.03);
+  }
+  .agent-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .agent-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .agent-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: #EAF9F0;
+    color: #06A853;
+  }
+  .agent-badge.warn {
+    background: #FEF3C7;
+    color: #B45309;
+  }
+  .agent-meta {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.55;
+    word-break: break-all;
+    margin-bottom: 14px;
+  }
+  .agent-btn {
+    width: 100%;
+    border: none;
+    background: var(--accent);
+    color: #FFFFFF;
+    font-size: 14.5px;
+    font-weight: 600;
+    padding: 12px 16px;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .agent-btn:active {
+    opacity: 0.9;
+  }
 </style>
 </head>
 <body>
@@ -292,7 +343,7 @@
     categories: [],
     items: []
   };
-  let activeCat = "chat";
+  let activeCat = "home";
   let expandedGroups = {};
 
   function loadExpanded() {
@@ -372,9 +423,28 @@
     const el = document.getElementById("content");
     const list = state.items.filter(i => i.category === activeCat);
     let html = "";
-    if (list.length === 0) {
+    if (activeCat === "home") {
+      const ag = state.agent || {};
+      const badgeCls = ag.hasApiKey ? "" : "warn";
+      const badgeText = ag.hasApiKey ? (ag.model || "已就绪") : "待填 Key";
+      html += `
+        <div class="agent-card">
+          <div class="agent-top">
+            <span class="agent-title">Acid Agent</span>
+            <span class="agent-badge ${badgeCls}">${escapeHtml(badgeText)}</span>
+          </div>
+          <div class="agent-meta">
+            工具：bash / read / write / edit / wechat<br/>
+            工作区：${escapeHtml(ag.workspace || "")}<br/>
+            模型文件：${escapeHtml(ag.modelsFile || "")}
+          </div>
+          <button class="agent-btn" onclick="openAgent()">打开对话浮窗</button>
+        </div>
+      `;
+    }
+    if (list.length === 0 && activeCat !== "home") {
       html += '<div class="empty">暂无功能</div>';
-    } else {
+    } else if (list.length > 0) {
       const groups = [];
       const groupMap = {};
       for (const item of list) {
@@ -492,6 +562,10 @@
 
   function closePanel() {
     try { window.AcidBridge.close(); } catch (_) {}
+  }
+
+  function openAgent() {
+    try { window.AcidBridge.openAgent(); } catch (_) {}
   }
 
   function escapeHtml(s) {

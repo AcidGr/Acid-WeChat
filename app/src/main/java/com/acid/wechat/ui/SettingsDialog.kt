@@ -14,6 +14,7 @@ import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
+import com.acid.wechat.agent.AgentConfigStore
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.core.ConfigSchema
 import com.acid.wechat.core.ConfigStore
@@ -97,12 +98,26 @@ object SettingsDialog {
             }
 
             return JSONObject().apply {
+                val agentCfg = AgentConfigStore.getConfig()
                 put("hostVersion", HostContext.hostVersionName)
                 put("dexkitOk", dk.optInt("okCount", 0))
                 put("dexkitTotal", dk.optInt("total", 0))
                 put("categories", cats)
                 put("items", items)
+                put("agent", JSONObject().apply {
+                    put("model", agentCfg.model)
+                    put("hasApiKey", agentCfg.hasApiKey)
+                    put("workspace", AgentConfigStore.workspaceDir().absolutePath)
+                    put("modelsFile", AgentConfigStore.modelsFile().absolutePath)
+                })
             }.toString()
+        }
+
+        @JavascriptInterface
+        fun openAgent() {
+            activity.runOnUiThread {
+                AgentDialog.show(activity)
+            }
         }
 
         private fun appendOptionItem(items: JSONArray, categoryId: String, opt: FeatureOption) {

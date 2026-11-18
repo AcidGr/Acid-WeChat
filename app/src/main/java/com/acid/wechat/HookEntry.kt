@@ -1,6 +1,7 @@
 package com.acid.wechat
 
 import android.app.Application
+import com.acid.wechat.agent.AgentConfigStore
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.core.ConfigStore
 import com.acid.wechat.core.DexKitLocator
@@ -17,6 +18,7 @@ import com.acid.wechat.features.FakeSnsLikeFeature
 import com.acid.wechat.features.SavePathFeature
 import com.acid.wechat.features.SnsTailFeature
 import com.acid.wechat.ui.SettingsHook
+import com.acid.wechat.wechat.WeChatSender
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.IXposedHookZygoteInit
 import de.robv.android.xposed.XC_MethodHook
@@ -87,6 +89,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
         runCatching {
             HostContext.init(app)
             ConfigStore.load()
+            AgentConfigStore.ensureInitialized()
             AcidLogger.i(
                 TAG,
                 "Acid-WeChat ${HostContext.MODULE_VERSION_NAME} attached to ${HostContext.hostVersionName} (${HostContext.hostVersionCode})",
@@ -99,6 +102,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
 
             // Register features & DexKit rules
             MsgNoticeHelper.registerDexRules()
+            WeChatSender.registerDexRules()
             FeatureRegistry.register(AntiRecallFeature)
             FeatureRegistry.register(CustomGameEmojiFeature)
             FeatureRegistry.register(AntiMomentsPostFeature)
@@ -112,6 +116,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             DexKitLocator.resolveAll(forceRescan = false)
 
             MsgNoticeHelper.init()
+            WeChatSender.init()
             FeatureRegistry.initAll()
             AcidLogger.i(TAG, "Acid-WeChat bootstrap completed")
         }.onFailure {
