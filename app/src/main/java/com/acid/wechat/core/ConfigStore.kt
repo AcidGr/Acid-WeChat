@@ -22,11 +22,16 @@ object ConfigStore {
     const val KEY_ANTI_MOMENTS_DELETE = "anti_moments_delete"
     const val KEY_MOMENTS_DELETE_PREFIX = "moments_delete_prefix"
     const val KEY_FAKE_LIKE_ENABLED = "fake_like_enabled"
+    const val KEY_FAKE_COMMENT_ENABLED = "fake_comment_enabled"
+    const val KEY_SNS_TAIL_ENABLED = "sns_tail_enabled"
+    const val KEY_SNS_TAIL_TEXT = "sns_tail_text"
+    const val KEY_SNS_TAIL_AS_LOCATION = "sns_tail_as_location"
     const val KEY_DEBUG_SERVER = "debug_server"
     const val KEY_DEBUG_PORT = "debug_port"
 
     const val DEFAULT_MOMENTS_DELETE_PREFIX = "❌\\n"
     const val DEFAULT_RECALL_NOTICE_TEXT = "「{name}」尝试撤回一条消息（已拦截）"
+    const val DEFAULT_SNS_TAIL_TEXT = "来自 iPhone 16 Pro Max"
 
     private val retiredKeys = setOf(
         "anti_recall_self",
@@ -68,6 +73,10 @@ object ConfigStore {
         map.putIfAbsent(KEY_ANTI_MOMENTS_DELETE, true)
         map.putIfAbsent(KEY_MOMENTS_DELETE_PREFIX, DEFAULT_MOMENTS_DELETE_PREFIX)
         map.putIfAbsent(KEY_FAKE_LIKE_ENABLED, true)
+        map.putIfAbsent(KEY_FAKE_COMMENT_ENABLED, true)
+        map.putIfAbsent(KEY_SNS_TAIL_ENABLED, false)
+        map.putIfAbsent(KEY_SNS_TAIL_TEXT, DEFAULT_SNS_TAIL_TEXT)
+        map.putIfAbsent(KEY_SNS_TAIL_AS_LOCATION, true)
         map.putIfAbsent(KEY_DEBUG_SERVER, true)
         map.putIfAbsent(KEY_DEBUG_PORT, 19898)
     }

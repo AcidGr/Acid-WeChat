@@ -1,6 +1,7 @@
 package com.acid.wechat.wechat
 
 import android.app.Activity
+import android.widget.BaseAdapter
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.core.DexKitLocator
 import com.acid.wechat.core.HostContext
@@ -10,7 +11,9 @@ import com.acid.wechat.core.WcdbBridge
 import java.math.BigInteger
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.LinkedList
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Moments (`SnsMicroMsg.db` / `SnsInfoStorage`) repository and live UI sync helper.
@@ -24,15 +27,22 @@ object SnsRepository {
         val authorName: String,
         val caption: String,
         val timeText: String,
-        val likes: List<ProtoLite.LikeEntry>,
-    )
+        val likes: List<SnsProto.LikeEntry>,
+        val comments: List<SnsProto.CommentEntry>,
+    ) {
+        fun headerLine(): String =
+            authorName + if (timeText.isNotEmpty()) " · $timeText" else ""
+    }
 
     private lateinit var ruleGetStorage: DexKitLocator.DexRule
     private lateinit var ruleGetBySnsId: DexKitLocator.DexRule
     private lateinit var ruleReplaceBySnsId: DexKitLocator.DexRule
     private lateinit var ruleSetLikedHeader: DexKitLocator.DexRule
+    private val dexRegistered = AtomicBoolean(false)
 
     fun registerDexRules() {
+        if (!dexRegistered.compareAndSet(false, true)) return
+
         ruleGetStorage = DexKitLocator.registerMethod(
             id = "sns_core_get_info_storage",
             description = "SnsCore.getSnsInfoStorage()",
@@ -134,19 +144,46 @@ object SnsRepository {
             } else {
                 ""
             }
-            SnsPostSummary(snsId, author, caption, timeText, ProtoLite.readSnsObjectLikes(attrBuf))
+            SnsPostSummary(
+                snsId = snsId,
+                authorName = author,
+                caption = caption,
+                timeText = timeText,
+                likes = SnsProto.readLikes(attrBuf),
+                comments = SnsProto.readComments(attrBuf),
+            )
         }
     }.getOrNull()
 
-    /**
-     * Patches `SnsInfo.field_attrBuf` in-place via `SnsInfoStorage` so both `SnsMicroMsg.db`
-     * and WeChat's UI notify pipeline (`ImproveDataUIC` / `SnsCommentDetailUI`) reflect changes immediately.
-     */
     fun applyLikesToPost(
         snsId: Long,
-        desiredFakeLikes: List<ProtoLite.LikeEntry>,
+        desiredFakeLikes: List<SnsProto.LikeEntry>,
         removedFakeUsernames: Set<String>,
         currentActivity: Activity?,
+    ): Pair<Boolean, Int> = mutatePostAttrBuf(
+        snsId = snsId,
+        currentActivity = currentActivity,
+        mutator = { old -> SnsProto.applyLikes(old, removedFakeUsernames, desiredFakeLikes) },
+        countReader = { buf -> SnsProto.readLikes(buf).size },
+    )
+
+    fun applyCommentsToPost(
+        snsId: Long,
+        addComments: List<SnsProto.CommentEntry>,
+        removeCommentIds: Set<Int>,
+        currentActivity: Activity?,
+    ): Pair<Boolean, Int> = mutatePostAttrBuf(
+        snsId = snsId,
+        currentActivity = currentActivity,
+        mutator = { old -> SnsProto.applyComments(old, removeCommentIds, addComments) },
+        countReader = { buf -> SnsProto.readComments(buf).size },
+    )
+
+    private fun mutatePostAttrBuf(
+        snsId: Long,
+        currentActivity: Activity?,
+        mutator: (ByteArray) -> ByteArray?,
+        countReader: (ByteArray) -> Int,
     ): Pair<Boolean, Int> {
         val storage = ruleGetStorage.resolveMethod()?.invoke(null) ?: return false to 0
         val getMethod = ruleGetBySnsId.resolveMethod() ?: return false to 0
@@ -156,40 +193,65 @@ object SnsRepository {
             val snsInfo = getMethod.invoke(storage, snsId) ?: return false to 0
             val attrField = ReflectHelper.findField(snsInfo.javaClass, "field_attrBuf") ?: return false to 0
             val oldAttrBuf = (attrField.get(snsInfo) as? ByteArray) ?: ByteArray(0)
-            val newAttrBuf = ProtoLite.applyLikesToSnsObject(oldAttrBuf, removedFakeUsernames, desiredFakeLikes)
-                ?: oldAttrBuf
-            val totalLikes = ProtoLite.readSnsObjectLikes(newAttrBuf).size
+            val newAttrBuf = mutator(oldAttrBuf) ?: oldAttrBuf
+            val count = countReader(newAttrBuf)
 
             if (newAttrBuf !== oldAttrBuf) {
                 attrField.set(snsInfo, newAttrBuf)
+                ReflectHelper.findField(snsInfo.javaClass, "contentByteMd5")?.set(snsInfo, null)
                 replaceMethod.invoke(storage, snsId, snsInfo)
                 ReflectHelper.findMethod(storage.javaClass, "doNotify", emptyList())?.invoke(storage)
             }
             refreshDetailActivityIfVisible(currentActivity, newAttrBuf)
-            AcidLogger.i(TAG, "applied fake likes on snsId=$snsId -> totalLikes=$totalLikes")
-            true to totalLikes
+            true to count
         }.onFailure {
-            AcidLogger.w(TAG, "applyLikesToPost failed for snsId=$snsId", it)
+            AcidLogger.w(TAG, "mutatePostAttrBuf failed for snsId=$snsId", it)
         }.getOrDefault(false to 0)
     }
 
     private fun refreshDetailActivityIfVisible(activity: Activity?, attrBuf: ByteArray) {
         if (activity == null || !activity.javaClass.name.endsWith("SnsCommentDetailUI")) return
-        val setLikedHeader = ruleSetLikedHeader.resolveMethod() ?: return
         runCatching {
             val snsObjCls = Class.forName(SNS_OBJECT_CLASS, false, HostContext.classLoader)
             val snsObj = snsObjCls.getDeclaredConstructor().newInstance()
             val parseMethod = ReflectHelper.findMethod(snsObjCls, "parseFrom", listOf(ByteArray::class.java))
                 ?: return
             parseMethod.invoke(snsObj, attrBuf)
-            val likeList = ReflectHelper.findField(snsObjCls, "LikeUserList")?.get(snsObj) as? List<*> ?: return
-            val commentList = ReflectHelper.findField(snsObjCls, "CommentUserList")?.get(snsObj) as? List<*>
+            val likeList = ReflectHelper.findField(snsObjCls, "LikeUserList")?.get(snsObj) as? LinkedList<*> ?: return
+            val commentList = ReflectHelper.findField(snsObjCls, "CommentUserList")?.get(snsObj) as? LinkedList<*>
             val commentsEmpty = commentList?.isEmpty() ?: true
+            val setLikedHeader = ruleSetLikedHeader.resolveMethod()
+
             activity.runOnUiThread {
-                runCatching { setLikedHeader.invoke(activity, likeList, commentsEmpty) }
+                runCatching { setLikedHeader?.invoke(activity, likeList, commentsEmpty) }
+                refreshCommentAdapter(activity, commentList, likeList)
             }
         }.onFailure {
             AcidLogger.w(TAG, "refreshDetailActivityIfVisible failed", it)
+        }
+    }
+
+    private fun refreshCommentAdapter(
+        activity: Activity,
+        commentList: LinkedList<*>?,
+        likeList: LinkedList<*>,
+    ) {
+        runCatching {
+            val adapterField = activity.javaClass.declaredFields.firstOrNull {
+                it.type.name.endsWith("CommentListAdapter")
+            } ?: return
+            adapterField.isAccessible = true
+            val adapter = adapterField.get(activity) as? BaseAdapter ?: return
+            val listFields = adapter.javaClass.declaredFields.filter {
+                LinkedList::class.java.isAssignableFrom(it.type)
+            }
+            if (listFields.size >= 2) {
+                listFields[0].isAccessible = true
+                listFields[1].isAccessible = true
+                if (commentList != null) listFields[0].set(adapter, commentList)
+                listFields[1].set(adapter, likeList)
+            }
+            adapter.notifyDataSetChanged()
         }
     }
 }

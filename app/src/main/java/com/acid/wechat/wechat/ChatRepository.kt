@@ -26,7 +26,10 @@ object ChatRepository {
         val nickname: String,
         val remark: String,
         val alias: String,
-    )
+    ) {
+        fun subtitleLabel(): String =
+            if (remark.isNotEmpty() && nickname.isNotEmpty() && remark != nickname) nickname else alias
+    }
 
     fun queryIsSendBySvrId(msgSvrId: Long): Boolean? {
         val cursor = WcdbBridge.rawQuery(

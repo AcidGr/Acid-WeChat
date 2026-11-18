@@ -2,14 +2,13 @@ package com.acid.wechat.wechat
 
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.core.HostContext
-import com.acid.wechat.core.ProtoLite
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Persistent store for fake-like entries (`snsId -> List<ProtoLite.LikeEntry>`)
+ * Persistent store for fake-like entries (`snsId -> List<SnsProto.LikeEntry>`)
  * so server syncs never wipe locally applied fake likes and unchecking stays deterministic.
  */
 object SnsFakeLikeStore {
@@ -17,7 +16,7 @@ object SnsFakeLikeStore {
     private const val FILE_NAME = "fake_likes.json"
 
     private val lock = Any()
-    private val map = ConcurrentHashMap<String, List<ProtoLite.LikeEntry>>()
+    private val map = ConcurrentHashMap<String, List<SnsProto.LikeEntry>>()
 
     fun load() {
         synchronized(lock) {
@@ -29,12 +28,12 @@ object SnsFakeLikeStore {
                 while (keys.hasNext()) {
                     val snsIdKey = keys.next()
                     val arr = root.optJSONArray(snsIdKey) ?: continue
-                    val list = ArrayList<ProtoLite.LikeEntry>(arr.length())
+                    val list = ArrayList<SnsProto.LikeEntry>(arr.length())
                     for (i in 0 until arr.length()) {
                         val obj = arr.optJSONObject(i) ?: continue
                         val u = obj.optString("u").trim()
                         if (u.isEmpty()) continue
-                        list += ProtoLite.LikeEntry(
+                        list += SnsProto.LikeEntry(
                             username = u,
                             nickname = obj.optString("n", u),
                             createTime = obj.optInt("t", 0),
@@ -50,12 +49,14 @@ object SnsFakeLikeStore {
         }
     }
 
-    fun get(snsId: Long): List<ProtoLite.LikeEntry> = map[snsId.toString()].orEmpty()
+    fun get(snsId: Long): List<SnsProto.LikeEntry> = map[snsId.toString()].orEmpty()
 
     fun getUsernames(snsId: Long): Set<String> =
         get(snsId).mapTo(LinkedHashSet()) { it.username }
 
-    fun set(snsId: Long, entries: List<ProtoLite.LikeEntry>) {
+    fun postCount(): Int = map.size
+
+    fun set(snsId: Long, entries: List<SnsProto.LikeEntry>) {
         val key = snsId.toString()
         synchronized(lock) {
             if (entries.isEmpty()) {

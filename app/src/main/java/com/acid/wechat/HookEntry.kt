@@ -12,7 +12,9 @@ import com.acid.wechat.debug.DebugServer
 import com.acid.wechat.features.AntiMomentsPostFeature
 import com.acid.wechat.features.AntiRecallFeature
 import com.acid.wechat.features.CustomGameEmojiFeature
+import com.acid.wechat.features.FakeSnsCommentFeature
 import com.acid.wechat.features.FakeSnsLikeFeature
+import com.acid.wechat.features.SnsTailFeature
 import com.acid.wechat.ui.SettingsHook
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.IXposedHookZygoteInit
@@ -80,6 +82,8 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             FeatureRegistry.register(CustomGameEmojiFeature)
             FeatureRegistry.register(AntiMomentsPostFeature)
             FeatureRegistry.register(FakeSnsLikeFeature)
+            FeatureRegistry.register(FakeSnsCommentFeature)
+            FeatureRegistry.register(SnsTailFeature)
             FeatureRegistry.registerAllDexRules()
 
             // Resolve DexKit (instant on cache hit; scans once per WeChat version/Tinker change)

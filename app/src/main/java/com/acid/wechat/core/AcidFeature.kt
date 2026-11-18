@@ -102,9 +102,18 @@ object FeatureRegistry {
         ConfigStore.isEffective(feature.configKey, feature.defaultEnabled, feature.dependsOn)
 
     fun setEnabled(id: String, enabled: Boolean): Boolean {
-        val state = states.firstOrNull { it.feature.id == id } ?: return false
-        ConfigStore.putBoolean(state.feature.configKey, enabled)
-        AcidLogger.i(TAG, "toggled feature $id -> $enabled")
+        val state = states.firstOrNull { it.feature.id == id }
+        if (state != null) {
+            ConfigStore.putBoolean(state.feature.configKey, enabled)
+            AcidLogger.i(TAG, "toggled feature $id -> $enabled")
+            return true
+        }
+        val opt = states.asSequence()
+            .flatMap { it.feature.extraOptions().asSequence() }
+            .firstOrNull { it.type == FeatureOption.TYPE_SWITCH && it.configKey == id }
+            ?: return false
+        ConfigStore.putBoolean(opt.configKey, enabled)
+        AcidLogger.i(TAG, "toggled option $id -> $enabled")
         return true
     }
 
@@ -133,6 +142,22 @@ object FeatureRegistry {
                 put("initialized", st.initialized)
                 put("hitCount", st.hitCount.get())
                 put("lastError", st.lastError ?: JSONObject.NULL)
+                put("options", JSONArray().apply {
+                    for (opt in f.extraOptions()) {
+                        put(JSONObject().apply {
+                            put("title", opt.title)
+                            put("configKey", opt.configKey)
+                            put("group", opt.group)
+                            put("type", opt.type)
+                            put("dependsOn", opt.dependsOn ?: JSONObject.NULL)
+                            if (opt.type == FeatureOption.TYPE_TEXT) {
+                                put("value", ConfigStore.getString(opt.configKey, opt.defaultText))
+                            } else {
+                                put("enabled", ConfigStore.getBoolean(opt.configKey, opt.defaultValue))
+                            }
+                        })
+                    }
+                })
                 put("extra", runCatching { f.statusJson() }.getOrElse { JSONObject() })
             })
         }
