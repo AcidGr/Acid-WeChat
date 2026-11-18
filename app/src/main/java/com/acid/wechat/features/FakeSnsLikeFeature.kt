@@ -1,15 +1,11 @@
 package com.acid.wechat.features
 
 import android.app.Activity
-import android.app.Dialog
 import android.content.Context
 import android.content.ContextWrapper
-import android.net.Uri
 import android.view.ContextMenu
 import android.view.MenuItem
 import android.view.View
-import android.webkit.JavascriptInterface
-import android.webkit.WebResourceResponse
 import android.widget.Toast
 import com.acid.wechat.core.AcidFeature
 import com.acid.wechat.core.AcidLogger
@@ -19,15 +15,16 @@ import com.acid.wechat.core.FeatureCategory
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.ProtoLite
 import com.acid.wechat.core.WcdbBridge
-import com.acid.wechat.ui.overlay.FloatingSheetDialog
+import com.acid.wechat.ui.overlay.AcidModal
+import com.acid.wechat.ui.overlay.AcidModalSpec
+import com.acid.wechat.ui.overlay.ChecklistItem
+import com.acid.wechat.ui.overlay.ModalBlock
 import com.acid.wechat.wechat.ChatRepository
 import com.acid.wechat.wechat.SnsFakeLikeStore
 import com.acid.wechat.wechat.SnsRepository
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
-import org.json.JSONArray
 import org.json.JSONObject
-import java.io.FileInputStream
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -35,13 +32,13 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Moments Fake Likes feature:
  * - Injects "伪集赞" (or "清除伪集赞" when already fake-liked) into WeChat's native Moment long-press menu.
- * - Opens a centered floating panel pre-targeted to the long-pressed Moment `snsId`, displaying
- *   cached WeChat avatars, friend search, and custom-count random selection.
+ * - Uses the standard [AcidModal] floating dialog pre-targeted to the long-pressed Moment `snsId`.
  * - Preserves fake likes across server syncs via WcdbBridge SnsInfo update interception.
  */
 object FakeSnsLikeFeature : AcidFeature {
     private const val TAG = "FakeSnsLike"
     private const val TBL_SNS_INFO = "SnsInfo"
+    private const val KEY_FRIENDS = "friends"
     private const val MENU_ITEM_FAKE_LIKE_ID = 198901
     private const val MENU_ITEM_CLEAR_FAKE_LIKE_ID = 198902
     private const val MENU_TITLE_FAKE_LIKE = "伪集赞"
@@ -195,7 +192,7 @@ object FakeSnsLikeFeature : AcidFeature {
                     if (itemId == MENU_ITEM_CLEAR_FAKE_LIKE_ID) {
                         clearFakeLikesForPost(activity, snsId)
                     } else {
-                        openSheet(activity, snsId)
+                        openModal(activity, snsId)
                     }
                 }
             })
@@ -203,6 +200,110 @@ object FakeSnsLikeFeature : AcidFeature {
             FeatureRegistry.recordError(id, it)
             AcidLogger.w(TAG, "hookMenuItemSelected failed", it)
         }
+    }
+
+    private fun openModal(activity: Activity, snsId: Long) {
+        val post = SnsRepository.queryPostSummary(snsId)
+        val friends = ChatRepository.queryFriends(1000)
+        val fakeUsers = SnsFakeLikeStore.getUsernames(snsId)
+        val realSet = HashSet<String>()
+        if (post != null) {
+            for (like in post.likes) {
+                if (like.username !in fakeUsers) {
+                    realSet += like.username
+                }
+            }
+        }
+
+        val items = friends.map { f ->
+            val sub = if (f.remark.isNotEmpty() && f.nickname.isNotEmpty() && f.remark != f.nickname) {
+                f.nickname
+            } else {
+                f.alias
+            }
+            ChecklistItem(
+                id = f.username,
+                title = f.displayName,
+                subtitle = sub,
+                avatarUsername = f.username,
+                checked = f.username in fakeUsers,
+                lockedBadge = if (f.username in realSet) "已真赞" else null,
+            )
+        }
+
+        val authorLine = (post?.authorName ?: "当前朋友圈") +
+            (if (!post?.timeText.isNullOrEmpty()) " · ${post?.timeText}" else "")
+
+        AcidModal.show(
+            activity = activity,
+            spec = AcidModalSpec(
+                title = MENU_TITLE_FAKE_LIKE,
+                primaryButtonText = "应用集赞",
+                blocks = listOf(
+                    ModalBlock.Preview(title = authorLine, body = post?.caption ?: "[当前动态]"),
+                    ModalBlock.RandomCountBar(
+                        checklistKey = KEY_FRIENDS,
+                        defaultCount = 10,
+                        placeholder = "赞数",
+                        pickLabel = "随机勾选",
+                        clearLabel = "清空",
+                    ),
+                    ModalBlock.Checklist(
+                        key = KEY_FRIENDS,
+                        items = items,
+                        multiSelect = true,
+                        searchPlaceholder = "搜索好友备注 / 昵称",
+                        filterSelectedLabel = "已选",
+                        emptyText = "暂未获取到好友列表，请先打开任意聊天或通讯录",
+                        lockedCountOffset = realSet.size,
+                        headerTemplate = "真赞 {locked} · 合计 {total}",
+                        footerTemplate = "伪赞 {selected} · 共 {total}",
+                    ),
+                ),
+                onSubmit = { result ->
+                    applySelection(activity, snsId, result.selectedIds(KEY_FRIENDS))
+                },
+            ),
+        )
+    }
+
+    private fun applySelection(activity: Activity, snsId: Long, selectedUsernames: List<String>): Boolean {
+        val nowSec = (System.currentTimeMillis() / 1000L).toInt()
+        val desiredEntries = ArrayList<ProtoLite.LikeEntry>(selectedUsernames.size)
+        val newSet = LinkedHashSet<String>()
+        for ((idx, raw) in selectedUsernames.withIndex()) {
+            val username = raw.trim()
+            if (username.isEmpty() || !newSet.add(username)) continue
+            desiredEntries += ProtoLite.LikeEntry(
+                username = username,
+                nickname = ChatRepository.resolveSenderDisplayName(username, null, null),
+                createTime = nowSec - idx,
+            )
+        }
+
+        val oldSet = SnsFakeLikeStore.getUsernames(snsId)
+        val removed = oldSet.filterTo(HashSet()) { it !in newSet }
+
+        SnsFakeLikeStore.set(snsId, desiredEntries)
+        val (ok, totalLikes) = SnsRepository.applyLikesToPost(
+            snsId = snsId,
+            desiredFakeLikes = desiredEntries,
+            removedFakeUsernames = removed,
+            currentActivity = activity,
+        )
+
+        if (ok) {
+            appliedCount.incrementAndGet()
+            FeatureRegistry.recordHit(id)
+            activity.runOnUiThread {
+                Toast.makeText(activity, "已更新集赞（共 $totalLikes 赞）", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            activity.runOnUiThread {
+                Toast.makeText(activity, "写入点赞失败，请先刷新朋友圈后再试", Toast.LENGTH_SHORT).show()
+            }
+        }
+        return ok
     }
 
     private fun clearFakeLikesForPost(activity: Activity, snsId: Long) {
@@ -254,34 +355,6 @@ object FakeSnsLikeFeature : AcidFeature {
         }
     }
 
-    private fun openSheet(activity: Activity, snsId: Long) {
-        FloatingSheetDialog.show(
-            activity = activity,
-            assetPath = "assets/fake_like_sheet.html",
-            bridgeName = "FakeLikeBridge",
-            widthRatio = 0.90f,
-            heightRatio = 0.68f,
-            requestInterceptor = ::interceptAvatarRequest,
-            bridgeFactory = { dialog, _ -> FakeLikeBridge(activity, dialog, snsId) },
-        )
-    }
-
-    private fun interceptAvatarRequest(url: Uri): WebResourceResponse? {
-        if (url.host != "acid.local") return null
-        val path = url.path ?: return null
-        if (!path.startsWith("/avatar/")) return null
-        val username = Uri.decode(path.removePrefix("/avatar/")).trim()
-        val (file, mime) = ChatRepository.findCachedAvatar(username) ?: return null
-        return WebResourceResponse(
-            mime,
-            null,
-            200,
-            "OK",
-            mapOf("Cache-Control" to "max-age=300"),
-            FileInputStream(file),
-        )
-    }
-
     private fun unwrapActivity(ctx: Context?): Activity? {
         var cur = ctx
         while (cur is ContextWrapper) {
@@ -303,112 +376,6 @@ object FakeSnsLikeFeature : AcidFeature {
             cur = cur.superclass
         }
         return null
-    }
-
-    private class FakeLikeBridge(
-        private val activity: Activity,
-        private val dialog: Dialog,
-        private val snsId: Long,
-    ) {
-        @JavascriptInterface
-        fun getData(): String {
-            val post = SnsRepository.queryPostSummary(snsId)
-            val friends = ChatRepository.queryFriends(1000)
-
-            val fakeUsers = SnsFakeLikeStore.getUsernames(snsId)
-            val realUsers = JSONArray()
-            val fakeArr = JSONArray()
-            if (post != null) {
-                for (like in post.likes) {
-                    if (like.username in fakeUsers) {
-                        fakeArr.put(like.username)
-                    } else {
-                        realUsers.put(like.username)
-                    }
-                }
-            }
-
-            val friendArr = JSONArray()
-            for (f in friends) {
-                friendArr.put(JSONObject().apply {
-                    put("username", f.username)
-                    put("displayName", f.displayName)
-                    put(
-                        "subName",
-                        if (f.remark.isNotEmpty() && f.nickname.isNotEmpty() && f.remark != f.nickname) {
-                            f.nickname
-                        } else {
-                            f.alias
-                        },
-                    )
-                })
-            }
-
-            return JSONObject().apply {
-                put("snsId", snsId.toString())
-                put("author", post?.authorName ?: "当前朋友圈")
-                put("caption", post?.caption ?: "")
-                put("timeText", post?.timeText ?: "")
-                put("realUsers", realUsers)
-                put("fakeUsers", fakeArr)
-                put("friends", friendArr)
-            }.toString()
-        }
-
-        @JavascriptInterface
-        fun applyFakeLikes(selectedUsernamesJson: String): String {
-            val arr = runCatching { JSONArray(selectedUsernamesJson) }.getOrNull()
-                ?: return """{"ok":false,"error":"参数解析失败"}"""
-
-            val nowSec = (System.currentTimeMillis() / 1000L).toInt()
-            val desiredEntries = ArrayList<ProtoLite.LikeEntry>(arr.length())
-            val newSet = LinkedHashSet<String>()
-            for (i in 0 until arr.length()) {
-                val username = arr.optString(i).trim()
-                if (username.isEmpty() || !newSet.add(username)) continue
-                val displayName = ChatRepository.resolveSenderDisplayName(username, null, null)
-                desiredEntries += ProtoLite.LikeEntry(
-                    username = username,
-                    nickname = displayName,
-                    createTime = nowSec - i,
-                )
-            }
-
-            val oldSet = SnsFakeLikeStore.getUsernames(snsId)
-            val removed = oldSet.filterTo(HashSet()) { it !in newSet }
-
-            SnsFakeLikeStore.set(snsId, desiredEntries)
-            val (ok, totalLikes) = SnsRepository.applyLikesToPost(
-                snsId = snsId,
-                desiredFakeLikes = desiredEntries,
-                removedFakeUsernames = removed,
-                currentActivity = activity,
-            )
-
-            if (ok) {
-                appliedCount.incrementAndGet()
-                FeatureRegistry.recordHit(id)
-                activity.runOnUiThread {
-                    Toast.makeText(activity, "已更新集赞（共 $totalLikes 赞）", Toast.LENGTH_SHORT).show()
-                    if (dialog.isShowing) dialog.dismiss()
-                }
-            } else {
-                activity.runOnUiThread {
-                    Toast.makeText(activity, "写入点赞失败，请先刷新朋友圈后再试", Toast.LENGTH_SHORT).show()
-                }
-            }
-            return JSONObject().apply {
-                put("ok", ok)
-                put("totalLikes", totalLikes)
-            }.toString()
-        }
-
-        @JavascriptInterface
-        fun close() {
-            activity.runOnUiThread {
-                if (dialog.isShowing) dialog.dismiss()
-            }
-        }
     }
 
     override fun statusJson(): JSONObject = JSONObject().apply {

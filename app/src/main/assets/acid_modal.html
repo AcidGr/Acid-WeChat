@@ -1,0 +1,621 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Acid Modal</title>
+<style>
+  :root {
+    --bg: #FFFFFF;
+    --sub-bg: #F6F7F9;
+    --text: #111827;
+    --muted: #8E95A2;
+    --line: #ECEEF2;
+    --accent: #07C160;
+    --accent-soft: #EAF9F0;
+    --switch-off: #E2E5EA;
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  input {
+    user-select: text;
+    -webkit-user-select: text;
+    font-family: inherit;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans", "Helvetica Neue", sans-serif;
+    height: 100%;
+    overflow: hidden;
+  }
+  .modal {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .header {
+    padding: 14px 16px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+    flex-shrink: 0;
+  }
+  .title-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+  }
+  .title {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .stat {
+    font-size: 12px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .close-btn {
+    border: none;
+    background: var(--sub-bg);
+    color: #374151;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .blocks-fixed {
+    flex-shrink: 0;
+  }
+  .section {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .preview-card {
+    background: var(--sub-bg);
+    border-radius: 10px;
+    padding: 9px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .preview-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .preview-body {
+    font-size: 12px;
+    color: #4B5563;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .rand-row, .field-row, .search-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .field-row {
+    justify-content: space-between;
+  }
+  .field-label {
+    font-size: 13.5px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .rand-input {
+    width: 76px;
+    border: 1px solid #E5E7EB;
+    background: var(--sub-bg);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    padding: 6px 8px;
+    border-radius: 8px;
+    outline: none;
+  }
+  .text-input, .search-input {
+    border: 1px solid #E5E7EB;
+    background: var(--sub-bg);
+    color: var(--text);
+    font-size: 13px;
+    padding: 7px 11px;
+    border-radius: 9px;
+    outline: none;
+  }
+  .text-input {
+    width: 58%;
+    max-width: 220px;
+  }
+  .search-input {
+    flex: 1;
+  }
+  .rand-input:focus, .search-input:focus, .text-input:focus {
+    border-color: var(--accent);
+    background: #FFFFFF;
+  }
+  .pill-btn {
+    border: 1px solid #E5E7EB;
+    background: #FFFFFF;
+    color: #374151;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 11px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .pill-btn:active {
+    background: var(--sub-bg);
+  }
+  .pill-btn.primary-soft, .pill-btn.active {
+    border-color: #BBEBD0;
+    background: var(--accent-soft);
+    color: #06A853;
+    font-weight: 600;
+  }
+  .pill-btn.active {
+    border-color: var(--accent);
+  }
+  .switch {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    border-radius: 999px;
+    background: var(--switch-off);
+    transition: background-color 0.16s ease;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+    transition: transform 0.16s ease;
+  }
+  .switch.on {
+    background: var(--accent);
+  }
+  .switch.on::after {
+    transform: translateX(20px);
+  }
+  .list-wrap {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .list-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 16px;
+    border-bottom: 1px solid #F3F4F6;
+    cursor: pointer;
+  }
+  .list-row:active {
+    background: #FAFAFB;
+  }
+  .list-row.locked {
+    cursor: default;
+    opacity: 0.72;
+  }
+  .item-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .avatar {
+    position: relative;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--sub-bg);
+    color: #4B5563;
+    font-size: 13.5px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    overflow: hidden;
+  }
+  .avatar-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .item-names {
+    min-width: 0;
+  }
+  .item-title {
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .item-sub {
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .badge-locked {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #F3F4F6;
+    color: #6B7280;
+    flex-shrink: 0;
+  }
+  .check {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1.8px solid #D1D5DB;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.14s ease;
+  }
+  .check.on {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .check svg {
+    width: 13px;
+    height: 13px;
+    stroke: #FFFFFF;
+    stroke-width: 2.6;
+    fill: none;
+    display: none;
+  }
+  .check.on svg {
+    display: block;
+  }
+  .footer {
+    padding: 10px 16px 14px;
+    border-top: 1px solid var(--line);
+    background: #FFFFFF;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  .footer-info {
+    font-size: 12.5px;
+    color: #4B5563;
+    white-space: nowrap;
+  }
+  .apply-btn {
+    flex: 1;
+    border: none;
+    background: var(--accent);
+    color: #FFFFFF;
+    font-size: 14.5px;
+    font-weight: 600;
+    padding: 11px 16px;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .apply-btn:active {
+    background: #06AD56;
+  }
+  .empty {
+    padding: 40px 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13.5px;
+  }
+</style>
+</head>
+<body>
+<div class="modal">
+  <div class="header">
+    <div class="title-wrap">
+      <span class="title" id="modalTitle"></span>
+      <span class="stat" id="headerStat"></span>
+    </div>
+    <button class="close-btn" onclick="closeModal()">关闭</button>
+  </div>
+
+  <div class="blocks-fixed" id="fixedBlocks"></div>
+  <div class="list-wrap" id="listWrap"></div>
+
+  <div class="footer">
+    <div class="footer-info" id="footerInfo"></div>
+    <button class="apply-btn" id="primaryBtn" onclick="submitModal()">确定</button>
+  </div>
+</div>
+
+<script>
+  let spec = { title: "", subtitle: "", primaryButtonText: "确定", blocks: [] };
+  const fieldValues = {};
+  const listSelections = {};
+  const listFilters = {};
+  let primaryChecklist = null;
+
+  function init() {
+    try {
+      spec = JSON.parse(window.AcidModalBridge.getSpec());
+      document.getElementById("modalTitle").textContent = spec.title || "";
+      document.getElementById("primaryBtn").textContent = spec.primaryButtonText || "确定";
+
+      for (const b of spec.blocks) {
+        if (b.type === "checklist") {
+          primaryChecklist = b;
+          const set = new Set();
+          for (const it of b.items) {
+            if (it.checked && !it.lockedBadge) set.add(it.id);
+          }
+          listSelections[b.key] = set;
+          listFilters[b.key] = { query: "", onlySelected: false };
+        } else if (b.type === "text_input" || b.type === "number_input") {
+          fieldValues[b.key] = String(b.value != null ? b.value : "");
+        } else if (b.type === "toggle") {
+          fieldValues[b.key] = b.checked ? "true" : "false";
+        }
+      }
+
+      renderFixedBlocks();
+      if (primaryChecklist) {
+        renderChecklist(primaryChecklist);
+      } else {
+        document.getElementById("listWrap").style.display = "none";
+      }
+      updateStats();
+    } catch (e) {
+      document.getElementById("listWrap").innerHTML = '<div class="empty">加载失败</div>';
+    }
+  }
+
+  function renderFixedBlocks() {
+    const el = document.getElementById("fixedBlocks");
+    const html = [];
+    for (const b of spec.blocks) {
+      if (b.type === "preview") {
+        html.push(`
+          <div class="section">
+            <div class="preview-card">
+              <div class="preview-title">${escapeHtml(b.title)}</div>
+              ${b.body ? `<div class="preview-body">${escapeHtml(b.body)}</div>` : ""}
+            </div>
+          </div>
+        `);
+      } else if (b.type === "random_bar") {
+        html.push(`
+          <div class="section">
+            <div class="rand-row">
+              <input class="rand-input" id="rand_${escapeAttr(b.checklistKey)}" type="number" min="1" max="9999" value="${b.defaultCount}" placeholder="${escapeHtml(b.placeholder)}" />
+              <button class="pill-btn primary-soft" onclick="pickRandom('${escapeAttr(b.checklistKey)}')">${escapeHtml(b.pickLabel)}</button>
+              <button class="pill-btn" onclick="clearChecklist('${escapeAttr(b.checklistKey)}')">${escapeHtml(b.clearLabel)}</button>
+            </div>
+          </div>
+        `);
+      } else if (b.type === "checklist") {
+        html.push(`
+          <div class="section">
+            <div class="search-row">
+              <input class="search-input" type="text" placeholder="${escapeHtml(b.searchPlaceholder)}" oninput="onSearchInput('${escapeAttr(b.key)}', this.value)" />
+              ${b.multiSelect ? `<button class="pill-btn" id="filter_${escapeAttr(b.key)}" onclick="toggleFilterSelected('${escapeAttr(b.key)}')">${escapeHtml(b.filterSelectedLabel)}</button>` : ""}
+            </div>
+          </div>
+        `);
+      } else if (b.type === "text_input") {
+        html.push(`
+          <div class="section">
+            <div class="field-row">
+              <span class="field-label">${escapeHtml(b.label)}</span>
+              <input class="text-input" type="text" value="${escapeHtml(fieldValues[b.key] || "")}" placeholder="${escapeHtml(b.placeholder || "")}" oninput="onFieldInput('${escapeAttr(b.key)}', this.value)" />
+            </div>
+          </div>
+        `);
+      } else if (b.type === "number_input") {
+        html.push(`
+          <div class="section">
+            <div class="field-row">
+              <span class="field-label">${escapeHtml(b.label)}</span>
+              <input class="rand-input" type="number" min="${b.min}" max="${b.max}" value="${escapeHtml(fieldValues[b.key] || "0")}" oninput="onFieldInput('${escapeAttr(b.key)}', this.value)" />
+            </div>
+          </div>
+        `);
+      } else if (b.type === "toggle") {
+        const isOn = fieldValues[b.key] === "true";
+        html.push(`
+          <div class="section">
+            <div class="field-row" onclick="toggleBoolField('${escapeAttr(b.key)}', this)">
+              <span class="field-label">${escapeHtml(b.label)}</span>
+              <div class="switch ${isOn ? "on" : ""}"></div>
+            </div>
+          </div>
+        `);
+      }
+    }
+    el.innerHTML = html.join("");
+  }
+
+  function updateStats() {
+    const headerEl = document.getElementById("headerStat");
+    const footerEl = document.getElementById("footerInfo");
+    if (!primaryChecklist) {
+      headerEl.textContent = spec.subtitle || "";
+      footerEl.textContent = "";
+      footerEl.style.display = "none";
+      return;
+    }
+    const selected = (listSelections[primaryChecklist.key] || new Set()).size;
+    const locked = primaryChecklist.lockedCountOffset || 0;
+    const total = selected + locked;
+    const formatTpl = (tpl) => tpl
+      .replace(/\{selected\}/g, String(selected))
+      .replace(/\{locked\}/g, String(locked))
+      .replace(/\{total\}/g, String(total));
+
+    headerEl.textContent = primaryChecklist.headerTemplate ? formatTpl(primaryChecklist.headerTemplate) : (spec.subtitle || "");
+    footerEl.style.display = "block";
+    footerEl.textContent = formatTpl(primaryChecklist.footerTemplate || "已选 {selected}");
+  }
+
+  function onFieldInput(key, val) {
+    fieldValues[key] = val;
+  }
+
+  function toggleBoolField(key, rowEl) {
+    const next = fieldValues[key] !== "true";
+    fieldValues[key] = next ? "true" : "false";
+    const sw = rowEl.querySelector(".switch");
+    if (sw) sw.classList.toggle("on", next);
+  }
+
+  function onSearchInput(key, val) {
+    if (!listFilters[key]) return;
+    listFilters[key].query = (val || "").trim().toLowerCase();
+    if (primaryChecklist && primaryChecklist.key === key) renderChecklist(primaryChecklist);
+  }
+
+  function toggleFilterSelected(key) {
+    const f = listFilters[key];
+    if (!f) return;
+    f.onlySelected = !f.onlySelected;
+    const btn = document.getElementById("filter_" + key);
+    if (btn) btn.classList.toggle("active", f.onlySelected);
+    if (primaryChecklist && primaryChecklist.key === key) renderChecklist(primaryChecklist);
+  }
+
+  function pickRandom(key) {
+    if (!primaryChecklist || primaryChecklist.key !== key) return;
+    const input = document.getElementById("rand_" + key);
+    const n = parseInt(input ? input.value : "0", 10);
+    if (!n || n <= 0) return;
+    const pool = primaryChecklist.items.filter(it => !it.lockedBadge);
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    listSelections[key] = new Set(pool.slice(0, Math.min(n, pool.length)).map(it => it.id));
+    updateStats();
+    renderChecklist(primaryChecklist);
+  }
+
+  function clearChecklist(key) {
+    if (!listSelections[key]) return;
+    listSelections[key].clear();
+    updateStats();
+    if (primaryChecklist && primaryChecklist.key === key) renderChecklist(primaryChecklist);
+  }
+
+  function toggleItem(key, id) {
+    const b = primaryChecklist;
+    if (!b || b.key !== key) return;
+    const item = b.items.find(it => it.id === id);
+    if (!item || item.lockedBadge) return;
+    const set = listSelections[key];
+    if (!b.multiSelect) {
+      set.clear();
+      set.add(id);
+    } else if (set.has(id)) {
+      set.delete(id);
+    } else {
+      set.add(id);
+    }
+    updateStats();
+    renderChecklist(b);
+  }
+
+  function renderChecklist(b) {
+    const el = document.getElementById("listWrap");
+    if (!b.items || b.items.length === 0) {
+      el.innerHTML = `<div class="empty">${escapeHtml(b.emptyText)}</div>`;
+      return;
+    }
+    const f = listFilters[b.key] || { query: "", onlySelected: false };
+    const set = listSelections[b.key] || new Set();
+    const list = b.items.filter(it => {
+      if (f.onlySelected && !set.has(it.id)) return false;
+      if (!f.query) return true;
+      return it.title.toLowerCase().includes(f.query) ||
+        (it.subtitle && it.subtitle.toLowerCase().includes(f.query)) ||
+        it.id.toLowerCase().includes(f.query);
+    });
+    if (list.length === 0) {
+      el.innerHTML = '<div class="empty">无匹配项</div>';
+      return;
+    }
+    el.innerHTML = list.map(it => {
+      const locked = !!it.lockedBadge;
+      const checked = set.has(it.id);
+      const initial = escapeHtml((it.title || "?").slice(0, 1));
+      const avatarHtml = it.avatar !== undefined && it.avatar !== null
+        ? `<div class="avatar"><span>${initial}</span><img class="avatar-img" src="https://acid.local/avatar/${encodeURIComponent(it.avatar)}" loading="lazy" onerror="this.remove()" /></div>`
+        : "";
+      const subHtml = it.subtitle ? `<div class="item-sub">${escapeHtml(it.subtitle)}</div>` : "";
+      const rightHtml = locked
+        ? `<span class="badge-locked">${escapeHtml(it.lockedBadge)}</span>`
+        : `<div class="check ${checked ? "on" : ""}"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>`;
+      return `
+        <div class="list-row ${locked ? "locked" : ""}" onclick="toggleItem('${escapeAttr(b.key)}', '${escapeAttr(it.id)}')">
+          <div class="item-main">
+            ${avatarHtml}
+            <div class="item-names">
+              <div class="item-title">${escapeHtml(it.title)}</div>
+              ${subHtml}
+            </div>
+          </div>
+          ${rightHtml}
+        </div>
+      `;
+    }).join("");
+  }
+
+  function submitModal() {
+    const listsOut = {};
+    for (const [k, set] of Object.entries(listSelections)) {
+      listsOut[k] = Array.from(set);
+    }
+    try {
+      window.AcidModalBridge.submit(JSON.stringify({ values: fieldValues, lists: listsOut }));
+    } catch (_) {}
+  }
+
+  function closeModal() {
+    try { window.AcidModalBridge.close(); } catch (_) {}
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function escapeAttr(s) {
+    return String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  }
+
+  init();
+</script>
+</body>
+</html>

@@ -19,8 +19,8 @@ HookEntry (模块入口与生命周期编排)
 | `com.acid.wechat` | `HookEntry`：初始化核心桥接、注册 Feature、触发 DexKit 解析 | 不写具体业务逻辑或具体 Hook 细节 |
 | `com.acid.wechat.core` | `HostContext`、`ConfigStore`、`AcidFeature`、`FeatureRegistry`、`DexKitLocator`、`DexKitCache`、`ReflectHelper`、`WcdbBridge`、`ProtoLite`、`MsgNoticeHelper`、`AcidLogger` | 不包含特定微信业务（朋友圈/聊天）的表字段或规则判断 |
 | `com.acid.wechat.wechat` | `ChatRepository`、`SnsRepository`、`SnsFakeLikeStore`：封装 `EnMicroMsg.db` / `SnsMicroMsg.db` / `SnsInfoStorage` 查询、写入与持久化 | 不直接修改 UI 或持有开关策略 |
-| `com.acid.wechat.features` | `AntiRecallFeature`、`AntiMomentsPostFeature`、`FakeSnsLikeFeature`：每个 Feature 单文件负责一条功能链路、声明自己的 `DexRule` / `FeatureOption` / 上下文菜单 Hook | 不写裸 SQL（走 `wechat/` 仓储）；不手写设置页或底部弹窗容器；Feature 间不互相依赖 |
-| `com.acid.wechat.ui` | `WebViewHost`、`SettingsHook`、`SettingsDialog`、`ui/overlay/FloatingSheetDialog`：数据驱动设置页与通用纯白底部弹窗容器 | 不硬编码功能列表，完全由 `FeatureRegistry` / `ConfigStore` 驱动 |
+| `com.acid.wechat.features` | `AntiRecallFeature`、`AntiMomentsPostFeature`、`FakeSnsLikeFeature`：每个 Feature 单文件负责一条功能链路、声明自己的 `DexRule` / `FeatureOption` / `AcidModalSpec` | 不写裸 SQL（走 `wechat/` 仓储）；不手写设置页 HTML 或独立弹窗 HTML；Feature 间不互相依赖 |
+| `com.acid.wechat.ui` | `WebViewHost`、`SettingsHook`、`SettingsDialog`、`ui/overlay/`（`AcidModal`、`AcidModalSpec`、`FloatingSheetDialog`）：数据驱动设置页与标准居中悬浮弹窗体系 | 不硬编码功能列表，完全由 `FeatureRegistry` / `AcidModalSpec` / `ConfigStore` 驱动 |
 | `com.acid.wechat.debug` | `DebugServer`：`127.0.0.1:19898` 只读状态、日志与调试开关（可关闭） | 不绕过系统或宿主安全边界 |
 
 ---
@@ -49,7 +49,8 @@ HookEntry (模块入口与生命周期编排)
 1. 在 `ConfigStore` 定义配置 key 及默认值。
 2. 新建 `com.acid.wechat.features.XxxFeature : AcidFeature`，声明 `category`、`group`、`configKey`、`extraOptions()`。
 3. 如需访问微信新表结构，先在 `wechat/` 下沉淀仓储方法；如需要无版本依赖的 DEX 符号，在 `registerDexRules()` 注册 `DexKitLocator` 规则。
-4. 在 `HookEntry.bootstrap()` 注册一次即可自动接入 DexKit、配置持久化、WebView 设置页与 Debug 接口。
+4. 如需在微信页面内弹出交互窗口，**一律复用 `AcidModal.show(activity, AcidModalSpec(...))`** 拼装标准积木块（`Preview` / `RandomCountBar` / `Checklist` / `TextInput` / `NumberInput` / `Toggle`），禁止为新功能重复造独立弹窗 HTML。
+5. 在 `HookEntry.bootstrap()` 注册一次即可自动接入 DexKit、配置持久化、WebView 设置页与 Debug 接口。
 
 ---
 
