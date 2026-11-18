@@ -19,8 +19,8 @@ HookEntry (模块入口与生命周期编排)
 | `com.acid.wechat` | `HookEntry`：初始化核心桥接、注册 Feature、触发 DexKit 解析 | 不写具体业务逻辑或具体 Hook 细节 |
 | `com.acid.wechat.core` | `HostContext`、`ConfigStore`、`AcidFeature`、`FeatureRegistry`、`DexKitLocator`、`DexKitCache`、`ReflectHelper`、`WcdbBridge`、`ProtoLite`、`MsgNoticeHelper`、`AcidLogger` | 不包含特定微信业务（朋友圈/聊天）的表字段或规则判断 |
 | `com.acid.wechat.wechat` | `ChatRepository`、`SnsRepository`、`SnsFakeLikeStore`：封装 `EnMicroMsg.db` / `SnsMicroMsg.db` / `SnsInfoStorage` 查询、写入与持久化 | 不直接修改 UI 或持有开关策略 |
-| `com.acid.wechat.features` | `AntiRecallFeature`、`AntiMomentsPostFeature`、`FakeSnsLikeFeature`：每个 Feature 单文件负责一条功能链路、声明自己的 `DexRule` / `FeatureOption` / `FloatingActionSpec` | 不写裸 SQL（走 `wechat/` 仓储）；不手写设置页或通用浮窗底座；Feature 间不互相依赖 |
-| `com.acid.wechat.ui` | `WebViewHost`、`SettingsHook`、`SettingsDialog`、`ui/overlay/`（`FloatingActionSpec`、`FloatingEntryHost`、`FloatingSheetDialog`）：数据驱动设置页与通用外部浮窗 UI 底座 | 不硬编码功能列表，完全由 `FeatureRegistry` / `FloatingActionRegistry` / `ConfigStore` 驱动 |
+| `com.acid.wechat.features` | `AntiRecallFeature`、`AntiMomentsPostFeature`、`FakeSnsLikeFeature`：每个 Feature 单文件负责一条功能链路、声明自己的 `DexRule` / `FeatureOption` / 上下文菜单 Hook | 不写裸 SQL（走 `wechat/` 仓储）；不手写设置页或底部弹窗容器；Feature 间不互相依赖 |
+| `com.acid.wechat.ui` | `WebViewHost`、`SettingsHook`、`SettingsDialog`、`ui/overlay/FloatingSheetDialog`：数据驱动设置页与通用纯白底部弹窗容器 | 不硬编码功能列表，完全由 `FeatureRegistry` / `ConfigStore` 驱动 |
 | `com.acid.wechat.debug` | `DebugServer`：`127.0.0.1:19898` 只读状态、日志与调试开关（可关闭） | 不绕过系统或宿主安全边界 |
 
 ---

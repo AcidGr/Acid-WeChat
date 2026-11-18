@@ -20,16 +20,19 @@ object ConfigStore {
     const val KEY_ANTI_MOMENTS_DELETE = "anti_moments_delete"
     const val KEY_MOMENTS_DELETE_PREFIX = "moments_delete_prefix"
     const val KEY_FAKE_LIKE_ENABLED = "fake_like_enabled"
-    const val KEY_FAKE_LIKE_FLOAT_BUTTON = "fake_like_float_button"
-    const val KEY_FLOAT_BTN_Y_RATIO = "float_btn_y_ratio"
-    const val KEY_FLOAT_BTN_RIGHT_SIDE = "float_btn_right_side"
     const val KEY_DEBUG_SERVER = "debug_server"
     const val KEY_DEBUG_PORT = "debug_port"
 
     const val DEFAULT_MOMENTS_DELETE_PREFIX = "❌\\n"
     const val DEFAULT_RECALL_NOTICE_TEXT = "「{name}」尝试撤回一条消息（已拦截）"
 
-    private val retiredKeys = setOf("anti_recall_self", "anti_moments_comment")
+    private val retiredKeys = setOf(
+        "anti_recall_self",
+        "anti_moments_comment",
+        "fake_like_float_button",
+        "float_btn_y_ratio",
+        "float_btn_right_side",
+    )
 
     fun load() {
         synchronized(lock) {
@@ -61,7 +64,6 @@ object ConfigStore {
         map.putIfAbsent(KEY_ANTI_MOMENTS_DELETE, true)
         map.putIfAbsent(KEY_MOMENTS_DELETE_PREFIX, DEFAULT_MOMENTS_DELETE_PREFIX)
         map.putIfAbsent(KEY_FAKE_LIKE_ENABLED, true)
-        map.putIfAbsent(KEY_FAKE_LIKE_FLOAT_BUTTON, true)
         map.putIfAbsent(KEY_DEBUG_SERVER, true)
         map.putIfAbsent(KEY_DEBUG_PORT, 19898)
     }

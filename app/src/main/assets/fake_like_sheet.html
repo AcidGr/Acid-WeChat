@@ -19,7 +19,7 @@
     -webkit-tap-highlight-color: transparent;
     user-select: none;
   }
-  input, select {
+  input {
     user-select: text;
     -webkit-user-select: text;
     font-family: inherit;
@@ -83,15 +83,25 @@
     padding: 10px 16px;
     border-bottom: 1px solid var(--line);
   }
-  .post-select {
-    width: 100%;
-    border: 1px solid #E5E7EB;
+  .post-preview {
     background: var(--sub-bg);
-    color: var(--text);
-    font-size: 13px;
-    padding: 8px 10px;
     border-radius: 10px;
-    outline: none;
+    padding: 9px 11px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .post-author {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .post-caption {
+    font-size: 12px;
+    color: #4B5563;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .rand-row {
     display: flex;
@@ -292,7 +302,10 @@
   </div>
 
   <div class="section">
-    <select class="post-select" id="postSelect" onchange="onPostChanged()"></select>
+    <div class="post-preview">
+      <div class="post-author" id="postAuthor">加载中...</div>
+      <div class="post-caption" id="postCaption"></div>
+    </div>
   </div>
 
   <div class="section">
@@ -322,8 +335,7 @@
 </div>
 
 <script>
-  let data = { targetSnsId: null, posts: [], friends: [] };
-  let currentSnsId = "";
+  let data = { snsId: "", author: "", caption: "", timeText: "", realUsers: [], fakeUsers: [], friends: [] };
   let selectedSet = new Set();
   let realSet = new Set();
   let onlySelected = false;
@@ -332,43 +344,16 @@
     try {
       const raw = window.FakeLikeBridge.getData();
       data = JSON.parse(raw);
-      renderPosts();
+      realSet = new Set(data.realUsers || []);
+      selectedSet = new Set(data.fakeUsers || []);
+      document.getElementById("postAuthor").textContent =
+        data.author + (data.timeText ? ` · ${data.timeText}` : "");
+      document.getElementById("postCaption").textContent = data.caption || "[当前动态]";
+      updateStats();
       renderFriends();
     } catch (e) {
       document.getElementById("friendList").innerHTML = '<div class="empty">加载失败</div>';
     }
-  }
-
-  function renderPosts() {
-    const sel = document.getElementById("postSelect");
-    if (!data.posts || data.posts.length === 0) {
-      sel.innerHTML = '<option value="">暂无本地朋友圈缓存，请先浏览朋友圈</option>';
-      currentSnsId = "";
-      updateStats();
-      return;
-    }
-    sel.innerHTML = data.posts.map(p =>
-      `<option value="${escapeHtml(p.snsId)}">${escapeHtml(p.author)} · ${escapeHtml(p.caption)} (${p.totalLikes}赞)</option>`
-    ).join("");
-
-    const preferred = data.targetSnsId && data.posts.some(p => p.snsId === data.targetSnsId)
-      ? data.targetSnsId
-      : data.posts[0].snsId;
-    sel.value = preferred;
-    loadPostSelection(preferred);
-  }
-
-  function onPostChanged() {
-    loadPostSelection(document.getElementById("postSelect").value);
-    renderFriends();
-  }
-
-  function loadPostSelection(snsId) {
-    currentSnsId = snsId;
-    const post = data.posts.find(p => p.snsId === snsId);
-    realSet = new Set(post ? (post.realUsers || []) : []);
-    selectedSet = new Set(post ? (post.fakeUsers || []) : []);
-    updateStats();
   }
 
   function updateStats() {
@@ -462,9 +447,8 @@
   }
 
   function applyNow() {
-    if (!currentSnsId) return;
     try {
-      window.FakeLikeBridge.applyFakeLikes(currentSnsId, JSON.stringify(Array.from(selectedSet)));
+      window.FakeLikeBridge.applyFakeLikes(JSON.stringify(Array.from(selectedSet)));
     } catch (_) {}
   }
 

@@ -7,6 +7,7 @@ import com.acid.wechat.core.HostContext
 import com.acid.wechat.core.ProtoLite
 import com.acid.wechat.core.ReflectHelper
 import com.acid.wechat.core.WcdbBridge
+import java.math.BigInteger
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -73,61 +74,68 @@ object SnsRepository {
         }
     }
 
-    fun queryRecentPosts(limit: Int = 35): List<SnsPostSummary> = runCatching {
-        val cursor = WcdbBridge.rawQuerySns(
-            "SELECT snsId, userName, createTime, content, attrBuf FROM SnsInfo " +
-                "WHERE snsId != 0 ORDER BY createTime DESC LIMIT ?",
-            arrayOf(limit.toString()),
-        ) ?: return@runCatching emptyList()
-
-        val fmt = SimpleDateFormat("MM-dd HH:mm", Locale.getDefault())
-        val posts = mutableListOf<SnsPostSummary>()
-        cursor.use { c ->
-            while (c.moveToNext()) {
-                val snsId = c.getLong(0)
-                if (snsId == 0L) continue
-                val userName = c.getString(1).orEmpty()
-                val createSec = c.getInt(2)
-                val content = c.getBlob(3)
-                val attrBuf = c.getBlob(4)
-                val author = if (userName.isNotEmpty()) {
-                    ChatRepository.resolveSenderDisplayName(userName, null, null)
-                } else {
-                    "动态"
-                }
-                val caption = ProtoLite.readUtf8Field(content, 5)
-                    ?.replace('\n', ' ')
-                    ?.trim()
-                    ?.take(42)
-                    ?.ifEmpty { null }
-                    ?: "[图文动态]"
-                val timeText = if (createSec > 0) fmt.format(Date(createSec * 1000L)) else ""
-                val likes = ProtoLite.readSnsObjectLikes(attrBuf)
-                posts += SnsPostSummary(snsId, author, caption, timeText, likes)
+    fun resolveSnsId(timeLineObject: Any?, snsTableId: String?, activity: Activity?): Long? {
+        runCatching {
+            val idStr = timeLineObject?.let {
+                ReflectHelper.findField(it.javaClass, "Id")?.get(it) as? String
+            }?.trim()
+            if (!idStr.isNullOrEmpty() && idStr != "0") {
+                return BigInteger(idStr).toLong().takeIf { it != 0L }
             }
         }
-        posts
-    }.getOrDefault(emptyList())
-
-    fun extractSnsIdFromActivity(activity: Activity): Long? = runCatching {
-        val intent = activity.intent ?: return@runCatching null
-        val strId = intent.getStringExtra("INTENT_SNSID")?.removePrefix("sns_table_")?.trim()
-        strId?.toLongOrNull()?.takeIf { it != 0L }?.let { return@runCatching it }
-
-        val longId = intent.getLongExtra("INTENT_SNSID", 0L)
-        if (longId != 0L) return@runCatching longId
-
-        val localStr = intent.getStringExtra("INTENT_SNS_LOCAL_ID")?.removePrefix("sns_table_")?.trim()
-        val localId = localStr?.toIntOrNull() ?: intent.getIntExtra("INTENT_SNS_LOCAL_ID", -1)
-        if (localId >= 0) {
+        val localId = snsTableId?.removePrefix("sns_table_")?.trim()?.toLongOrNull()
+        if (localId != null && localId > 0L) {
             WcdbBridge.rawQuerySns(
                 "SELECT snsId FROM SnsInfo WHERE rowid = ? LIMIT 1",
                 arrayOf(localId.toString()),
             )?.use { c ->
-                if (c.moveToFirst()) return@runCatching c.getLong(0).takeIf { it != 0L }
+                if (c.moveToFirst()) return c.getLong(0).takeIf { it != 0L }
             }
         }
+        return activity?.let(::extractSnsIdFromIntent)
+    }
+
+    fun extractSnsIdFromIntent(activity: Activity): Long? = runCatching {
+        val intent = activity.intent ?: return@runCatching null
+        val strId = intent.getStringExtra("INTENT_SNSID")?.removePrefix("sns_table_")?.trim()
+        if (!strId.isNullOrEmpty()) {
+            return@runCatching runCatching { BigInteger(strId).toLong() }.getOrNull()?.takeIf { it != 0L }
+        }
+        val longId = intent.getLongExtra("INTENT_SNSID", 0L)
+        if (longId != 0L) return@runCatching longId
         null
+    }.getOrNull()
+
+    fun queryPostSummary(snsId: Long): SnsPostSummary? = runCatching {
+        val cursor = WcdbBridge.rawQuerySns(
+            "SELECT userName, createTime, content, attrBuf FROM SnsInfo WHERE snsId = ? LIMIT 1",
+            arrayOf(snsId.toString()),
+        ) ?: return@runCatching null
+
+        cursor.use { c ->
+            if (!c.moveToFirst()) return@runCatching null
+            val userName = c.getString(0).orEmpty()
+            val createSec = c.getInt(1)
+            val content = c.getBlob(2)
+            val attrBuf = c.getBlob(3)
+            val author = if (userName.isNotEmpty()) {
+                ChatRepository.resolveSenderDisplayName(userName, null, null)
+            } else {
+                "朋友圈"
+            }
+            val caption = ProtoLite.readUtf8Field(content, 5)
+                ?.replace('\n', ' ')
+                ?.trim()
+                ?.take(48)
+                ?.ifEmpty { null }
+                ?: "[图文动态]"
+            val timeText = if (createSec > 0) {
+                SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()).format(Date(createSec * 1000L))
+            } else {
+                ""
+            }
+            SnsPostSummary(snsId, author, caption, timeText, ProtoLite.readSnsObjectLikes(attrBuf))
+        }
     }.getOrNull()
 
     /**
