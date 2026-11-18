@@ -121,7 +121,7 @@ object DexKitLocator {
 
     fun clearCache(): Boolean = DexKitCache.clear()
 
-    fun resolveAll(forceRescan: Boolean = false) {
+    fun resolveAll(forceRescan: Boolean = false, saveCache: Boolean = true) {
         val fp = DexKitCache.computeHostFingerprint()
         lastFingerprint = fp
 
@@ -165,7 +165,9 @@ object DexKitLocator {
         }
 
         lastScanCostMs = System.currentTimeMillis() - startAll
-        DexKitCache.save(rules, ruleOrder, fp)
+        if (saveCache) {
+            DexKitCache.save(rules, ruleOrder, fp)
+        }
         val okCount = rules.values.count { it.status == RuleStatus.RESOLVED || it.status == RuleStatus.CACHED }
         AcidLogger.i(TAG, "DexKit scan complete: $okCount/${rules.size} resolved in ${lastScanCostMs}ms")
     }

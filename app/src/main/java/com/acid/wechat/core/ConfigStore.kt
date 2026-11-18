@@ -14,6 +14,9 @@ object ConfigStore {
     private val lock = Any()
     private val map = ConcurrentHashMap<String, Any>()
 
+    @Volatile
+    private var lastLoadedMtime: Long = 0L
+
     const val KEY_ANTI_RECALL = "anti_recall"
     const val KEY_ANTI_RECALL_NOTICE = "anti_recall_notice"
     const val KEY_ANTI_RECALL_NOTICE_TEXT = "anti_recall_notice_text"
@@ -26,12 +29,17 @@ object ConfigStore {
     const val KEY_SNS_TAIL_ENABLED = "sns_tail_enabled"
     const val KEY_SNS_TAIL_TEXT = "sns_tail_text"
     const val KEY_SNS_TAIL_AS_LOCATION = "sns_tail_as_location"
+    const val KEY_CUSTOM_SAVE_PATH_ENABLED = "custom_save_path_enabled"
+    const val KEY_SAVE_FILE_DIR = "save_file_dir"
+    const val KEY_SAVE_MEDIA_DIR = "save_media_dir"
     const val KEY_DEBUG_SERVER = "debug_server"
     const val KEY_DEBUG_PORT = "debug_port"
 
     const val DEFAULT_MOMENTS_DELETE_PREFIX = "❌\\n"
     const val DEFAULT_RECALL_NOTICE_TEXT = "「{name}」尝试撤回一条消息（已拦截）"
     const val DEFAULT_SNS_TAIL_TEXT = "来自 iPhone 16 Pro Max"
+    const val DEFAULT_SAVE_FILE_DIR = "Download/AcidWeChat"
+    const val DEFAULT_SAVE_MEDIA_DIR = "Pictures/AcidWeChat"
 
     private val retiredKeys = setOf(
         "anti_recall_self",
@@ -55,11 +63,22 @@ object ConfigStore {
                         map[k] = obj.get(k)
                     }
                     retiredKeys.forEach { map.remove(it) }
+                    lastLoadedMtime = f.lastModified()
                 } else {
                     saveLocked()
                 }
             }.onFailure {
                 AcidLogger.w(TAG, "load config failed, using defaults", it)
+            }
+        }
+    }
+
+    fun reloadIfModified() {
+        runCatching {
+            val f = File(HostContext.getDataDir(), FILE_NAME)
+            val m = f.lastModified()
+            if (m > 0L && m != lastLoadedMtime) {
+                load()
             }
         }
     }
@@ -77,6 +96,9 @@ object ConfigStore {
         map.putIfAbsent(KEY_SNS_TAIL_ENABLED, false)
         map.putIfAbsent(KEY_SNS_TAIL_TEXT, DEFAULT_SNS_TAIL_TEXT)
         map.putIfAbsent(KEY_SNS_TAIL_AS_LOCATION, true)
+        map.putIfAbsent(KEY_CUSTOM_SAVE_PATH_ENABLED, false)
+        map.putIfAbsent(KEY_SAVE_FILE_DIR, DEFAULT_SAVE_FILE_DIR)
+        map.putIfAbsent(KEY_SAVE_MEDIA_DIR, DEFAULT_SAVE_MEDIA_DIR)
         map.putIfAbsent(KEY_DEBUG_SERVER, true)
         map.putIfAbsent(KEY_DEBUG_PORT, 19898)
     }
@@ -161,6 +183,7 @@ object ConfigStore {
                 obj.put(k, v)
             }
             f.writeText(obj.toString(2), Charsets.UTF_8)
+            lastLoadedMtime = f.lastModified()
         }.onFailure {
             AcidLogger.w(TAG, "save config failed", it)
         }
