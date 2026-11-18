@@ -4,8 +4,7 @@ import android.app.Activity
 import android.widget.Toast
 import com.acid.wechat.core.AcidFeature
 import com.acid.wechat.core.AcidLogger
-import com.acid.wechat.core.ConfigStore
-import com.acid.wechat.core.FeatureCategory
+import com.acid.wechat.core.ConfigSchema
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.WcdbBridge
 import com.acid.wechat.ui.overlay.AcidModal
@@ -38,11 +37,7 @@ object FakeSnsLikeFeature : AcidFeature, SnsContextMenuHook.Provider {
     private val appliedCount = AtomicInteger(0)
 
     override val id = "fake_like"
-    override val name = "朋友圈伪集赞"
-    override val category = FeatureCategory.MOMENTS
-    override val group = "伪集赞"
-    override val description = "长按朋友圈菜单增加「伪集赞」，支持自选好友或随机指定人数"
-    override val configKey = ConfigStore.KEY_FAKE_LIKE_ENABLED
+    override val spec = ConfigSchema.FAKE_LIKE_ENABLED
 
     override fun registerDexRules() {
         SnsContextMenuHook.registerDexRules()

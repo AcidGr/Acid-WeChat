@@ -2,8 +2,8 @@ package com.acid.wechat.features
 
 import com.acid.wechat.core.AcidFeature
 import com.acid.wechat.core.AcidLogger
+import com.acid.wechat.core.ConfigSchema
 import com.acid.wechat.core.ConfigStore
-import com.acid.wechat.core.FeatureCategory
 import com.acid.wechat.core.FeatureOption
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.ProtoLite
@@ -23,22 +23,10 @@ object AntiMomentsPostFeature : AcidFeature {
     private val interceptedCount = AtomicInteger(0)
 
     override val id = "anti_moments_delete"
-    override val name = "朋友圈防删除"
-    override val category = FeatureCategory.MOMENTS
-    override val group = "防删除"
-    override val description = "拦截好友删除朋友圈并添加自定义前缀"
-    override val configKey = ConfigStore.KEY_ANTI_MOMENTS_DELETE
+    override val spec = ConfigSchema.ANTI_MOMENTS_DELETE
 
     override fun extraOptions(): List<FeatureOption> = listOf(
-        FeatureOption(
-            title = "删除前缀",
-            configKey = ConfigStore.KEY_MOMENTS_DELETE_PREFIX,
-            group = group,
-            type = FeatureOption.TYPE_TEXT,
-            defaultText = ConfigStore.DEFAULT_MOMENTS_DELETE_PREFIX,
-            placeholder = ConfigStore.DEFAULT_MOMENTS_DELETE_PREFIX,
-            dependsOn = ConfigStore.KEY_ANTI_MOMENTS_DELETE,
-        ),
+        FeatureOption.from(ConfigSchema.MOMENTS_DELETE_PREFIX),
     )
 
     override fun onInit() {
@@ -53,10 +41,7 @@ object AntiMomentsPostFeature : AcidFeature {
 
                 values.remove("sourceType")
 
-                val rawPrefix = ConfigStore.getString(
-                    ConfigStore.KEY_MOMENTS_DELETE_PREFIX,
-                    ConfigStore.DEFAULT_MOMENTS_DELETE_PREFIX,
-                ).ifEmpty { ConfigStore.DEFAULT_MOMENTS_DELETE_PREFIX }
+                val rawPrefix = ConfigStore.getString(ConfigSchema.MOMENTS_DELETE_PREFIX)
                 val prefix = ConfigStore.decodeNewlines(rawPrefix)
                 val emptyFallback = prefix.trimEnd('\n', '\r').ifEmpty { prefix }
 

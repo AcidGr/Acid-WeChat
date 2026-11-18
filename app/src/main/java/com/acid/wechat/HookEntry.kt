@@ -70,7 +70,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
 
         runCatching {
             HostContext.init(app)
-            ConfigStore.load()
+            ConfigStore.load(syncSchemaFile = false)
             FeatureRegistry.register(SavePathFeature)
             FeatureRegistry.registerAllDexRules()
             DexKitLocator.resolveAll(forceRescan = false, saveCache = false)

@@ -6,9 +6,9 @@ import android.view.View
 import android.widget.Toast
 import com.acid.wechat.core.AcidFeature
 import com.acid.wechat.core.AcidLogger
+import com.acid.wechat.core.ConfigSchema
 import com.acid.wechat.core.ConfigStore
 import com.acid.wechat.core.DexKitLocator
-import com.acid.wechat.core.FeatureCategory
 import com.acid.wechat.core.FeatureOption
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.HostContext
@@ -44,20 +44,10 @@ object CustomGameEmojiFeature : AcidFeature {
     private val customSentCount = AtomicInteger(0)
 
     override val id = "custom_jsb"
-    override val name = "自定义剪刀石头布"
-    override val category = FeatureCategory.CHAT
-    override val group = "动画表情"
-    override val description = "发送猜拳与骰子前弹出统一选择窗"
-    override val configKey = ConfigStore.KEY_CUSTOM_JSB
+    override val spec = ConfigSchema.CUSTOM_JSB
 
     override fun extraOptions(): List<FeatureOption> = listOf(
-        FeatureOption(
-            title = "自定义骰子",
-            configKey = ConfigStore.KEY_CUSTOM_DICE,
-            group = group,
-            defaultValue = true,
-            dependsOn = null,
-        ),
+        FeatureOption.from(ConfigSchema.CUSTOM_DICE),
     )
 
     override fun registerDexRules() {
@@ -85,8 +75,8 @@ object CustomGameEmojiFeature : AcidFeature {
         hookRandomEmojiOverride()
     }
 
-    private fun isJsbEnabled(): Boolean = ConfigStore.getBoolean(ConfigStore.KEY_CUSTOM_JSB, true)
-    private fun isDiceEnabled(): Boolean = ConfigStore.getBoolean(ConfigStore.KEY_CUSTOM_DICE, true)
+    private fun isJsbEnabled(): Boolean = ConfigStore.getBoolean(ConfigSchema.CUSTOM_JSB)
+    private fun isDiceEnabled(): Boolean = ConfigStore.getBoolean(ConfigSchema.CUSTOM_DICE)
 
     private fun hookPanelClick() {
         val clickMethod = rulePanelClick.resolveMethod() ?: return

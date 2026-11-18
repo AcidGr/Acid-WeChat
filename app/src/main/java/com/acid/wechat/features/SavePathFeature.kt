@@ -5,9 +5,9 @@ import android.os.Environment
 import android.provider.MediaStore
 import com.acid.wechat.core.AcidFeature
 import com.acid.wechat.core.AcidLogger
+import com.acid.wechat.core.ConfigSchema
 import com.acid.wechat.core.ConfigStore
 import com.acid.wechat.core.DexKitLocator
-import com.acid.wechat.core.FeatureCategory
 import com.acid.wechat.core.FeatureOption
 import com.acid.wechat.core.FeatureRegistry
 import de.robv.android.xposed.XC_MethodHook
@@ -36,32 +36,11 @@ object SavePathFeature : AcidFeature {
     private val redirectedCount = AtomicInteger(0)
 
     override val id = "custom_save_path"
-    override val name = "自定义保存路径"
-    override val category = FeatureCategory.ME
-    override val group = "保存路径"
-    override val description = "调整微信保存文件、图片和视频的导出目录"
-    override val configKey = ConfigStore.KEY_CUSTOM_SAVE_PATH_ENABLED
-    override val defaultEnabled = false
+    override val spec = ConfigSchema.CUSTOM_SAVE_PATH_ENABLED
 
     override fun extraOptions(): List<FeatureOption> = listOf(
-        FeatureOption(
-            title = "文件保存目录",
-            configKey = ConfigStore.KEY_SAVE_FILE_DIR,
-            group = group,
-            type = FeatureOption.TYPE_TEXT,
-            defaultText = ConfigStore.DEFAULT_SAVE_FILE_DIR,
-            placeholder = "例如 Download/AcidWeChat",
-            dependsOn = ConfigStore.KEY_CUSTOM_SAVE_PATH_ENABLED,
-        ),
-        FeatureOption(
-            title = "图片视频目录",
-            configKey = ConfigStore.KEY_SAVE_MEDIA_DIR,
-            group = group,
-            type = FeatureOption.TYPE_TEXT,
-            defaultText = ConfigStore.DEFAULT_SAVE_MEDIA_DIR,
-            placeholder = "例如 Pictures/AcidWeChat",
-            dependsOn = ConfigStore.KEY_CUSTOM_SAVE_PATH_ENABLED,
-        ),
+        FeatureOption.from(ConfigSchema.SAVE_FILE_DIR),
+        FeatureOption.from(ConfigSchema.SAVE_MEDIA_DIR),
     )
 
     override fun registerDexRules() {
@@ -117,19 +96,14 @@ object SavePathFeature : AcidFeature {
         hookMediaExportPath()
     }
 
-    private fun isSavePathEnabled(): Boolean {
-        ConfigStore.reloadIfModified()
-        return FeatureRegistry.isEnabled(this)
-    }
-
     private fun hookFileDownloadPath() {
         val m = ruleExportDownloadPath.resolveMethod() ?: return
         runCatching {
             XposedBridge.hookMethod(m, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (!isSavePathEnabled()) return
+                    if (!FeatureRegistry.isEnabled(this@SavePathFeature)) return
                     val orig = param.result as? String ?: return
-                    val rewritten = rewritePath(orig, ConfigStore.KEY_SAVE_FILE_DIR, ConfigStore.DEFAULT_SAVE_FILE_DIR, Environment.DIRECTORY_DOWNLOADS)
+                    val rewritten = rewritePath(orig, ConfigSchema.SAVE_FILE_DIR, Environment.DIRECTORY_DOWNLOADS)
                         ?: return
                     param.result = rewritten
                     recordRedirect("file", rewritten)
@@ -155,7 +129,7 @@ object SavePathFeature : AcidFeature {
         runCatching {
             XposedBridge.hookMethod(m, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!isSavePathEnabled()) return
+                    if (!FeatureRegistry.isEnabled(this@SavePathFeature)) return
                     val args = param.args ?: return
                     val origDest = args.getOrNull(2) as? String ?: return
                     val uri = args.getOrNull(3) as? Uri
@@ -165,10 +139,9 @@ object SavePathFeature : AcidFeature {
                         uri == MediaStore.Video.Media.EXTERNAL_CONTENT_URI
                     if (!isDownload && !isMedia) return
 
-                    val key = if (isDownload) ConfigStore.KEY_SAVE_FILE_DIR else ConfigStore.KEY_SAVE_MEDIA_DIR
-                    val def = if (isDownload) ConfigStore.DEFAULT_SAVE_FILE_DIR else ConfigStore.DEFAULT_SAVE_MEDIA_DIR
+                    val spec = if (isDownload) ConfigSchema.SAVE_FILE_DIR else ConfigSchema.SAVE_MEDIA_DIR
                     val subRoot = if (isDownload) Environment.DIRECTORY_DOWNLOADS else Environment.DIRECTORY_PICTURES
-                    val rewritten = rewritePath(origDest, key, def, subRoot) ?: return
+                    val rewritten = rewritePath(origDest, spec, subRoot) ?: return
                     if (rewritten != origDest) {
                         args[2] = rewritten
                         recordRedirect("scoped", rewritten)
@@ -191,10 +164,10 @@ object SavePathFeature : AcidFeature {
         }
         val hook = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
-                if (!isSavePathEnabled()) return
+                if (!FeatureRegistry.isEnabled(this@SavePathFeature)) return
                 val orig = param.result as? String ?: return
                 if (!orig.substringAfterLast('/').startsWith("mmexport")) return
-                val rewritten = rewritePath(orig, ConfigStore.KEY_SAVE_MEDIA_DIR, ConfigStore.DEFAULT_SAVE_MEDIA_DIR, Environment.DIRECTORY_PICTURES)
+                val rewritten = rewritePath(orig, ConfigSchema.SAVE_MEDIA_DIR, Environment.DIRECTORY_PICTURES)
                     ?: return
                 param.result = rewritten
                 recordRedirect("media", rewritten)
@@ -214,10 +187,10 @@ object SavePathFeature : AcidFeature {
         AcidLogger.i(TAG, "redirected $kind -> $dest")
     }
 
-    private fun rewritePath(origPath: String, key: String, defaultDir: String, subRoot: String): String? {
+    private fun rewritePath(origPath: String, spec: ConfigSchema.StringSpec, subRoot: String): String? {
         val fileName = origPath.substringAfterLast('/')
         if (fileName.isEmpty()) return null
-        val targetDir = resolveDirectory(ConfigStore.getString(key, defaultDir), subRoot) ?: return null
+        val targetDir = resolveDirectory(ConfigStore.getString(spec), subRoot) ?: return null
         return "${targetDir.trimEnd('/')}/$fileName"
     }
 
@@ -244,8 +217,8 @@ object SavePathFeature : AcidFeature {
     }
 
     override fun statusJson(): JSONObject {
-        val fileRaw = ConfigStore.getString(ConfigStore.KEY_SAVE_FILE_DIR, ConfigStore.DEFAULT_SAVE_FILE_DIR)
-        val mediaRaw = ConfigStore.getString(ConfigStore.KEY_SAVE_MEDIA_DIR, ConfigStore.DEFAULT_SAVE_MEDIA_DIR)
+        val fileRaw = ConfigStore.getString(ConfigSchema.SAVE_FILE_DIR)
+        val mediaRaw = ConfigStore.getString(ConfigSchema.SAVE_MEDIA_DIR)
         return JSONObject().apply {
             put("redirectedCount", redirectedCount.get())
             put("fileDir", fileRaw)

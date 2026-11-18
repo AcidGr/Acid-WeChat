@@ -17,7 +17,7 @@ HookEntry (模块入口与生命周期编排)
 | 包路径 | 职责范围 | 禁止事项 |
 | --- | --- | --- |
 | `com.acid.wechat` | `HookEntry`：初始化核心桥接、注册 Feature、触发 DexKit 解析 | 不写具体业务逻辑或具体 Hook 细节 |
-| `com.acid.wechat.core` | `HostContext`、`ConfigStore`、`AcidFeature`、`FeatureRegistry`、`DexKitLocator`、`DexKitCache`、`ReflectHelper`、`WcdbBridge`、`ProtoLite`、`MsgNoticeHelper`、`AcidLogger` | 不包含特定微信业务（朋友圈/聊天）的表字段或规则判断 |
+| `com.acid.wechat.core` | `HostContext`、`AcidIo`、`ConfigSchema`、`ConfigStore`、`AcidFeature`、`FeatureRegistry`、`DexKitLocator`、`DexKitCache`、`ReflectHelper`、`WcdbBridge`、`ProtoLite`、`MsgNoticeHelper`、`AcidLogger` | 不包含特定微信业务（朋友圈/聊天）的表字段或规则判断 |
 | `com.acid.wechat.wechat` | `ChatRepository`、`EmojiRepository`、`SnsRepository`、`SnsProto`、`SnsContextMenuHook`、`SnsFakeLikeStore`、`SnsFakeCommentStore`：封装 `EnMicroMsg.db` / `SnsMicroMsg.db` / `SnsInfoStorage` / 朋友圈长按菜单与 Protobuf 解析写入 | 不直接修改 UI 或持有开关策略 |
 | `com.acid.wechat.features` | `AntiRecallFeature`、`CustomGameEmojiFeature`、`AntiMomentsPostFeature`、`FakeSnsLikeFeature`、`FakeSnsCommentFeature`、`SnsTailFeature`、`SavePathFeature`：每个 Feature 单文件负责一条功能链路、声明自己的 `DexRule` / `FeatureOption` / `AcidModalSpec` | 不写裸 SQL（走 `wechat/` 仓储）；不手写设置页 HTML 或独立弹窗 HTML；Feature 间不互相依赖 |
 | `com.acid.wechat.ui` | `WebViewHost`、`SettingsHook`、`SettingsDialog`、`ui/overlay/`（`AcidModal`、`AcidModalSpec`、`FloatingSheetDialog`）：数据驱动设置页与标准居中悬浮弹窗体系 | 不硬编码功能列表，完全由 `FeatureRegistry` / `AcidModalSpec` / `ConfigStore` 驱动 |
@@ -46,11 +46,11 @@ HookEntry (模块入口与生命周期编排)
 
 ## 4. 新增 Feature 标准模板
 
-1. 在 `ConfigStore` 定义配置 key 及默认值。
-2. 新建 `com.acid.wechat.features.XxxFeature : AcidFeature`，声明 `category`、`group`、`configKey`、`extraOptions()`。
+1. 在 `ConfigSchema` 声明配置项（key、类型、默认值、校验/范围约束、分类与描述），由 `config.json` 作为唯一事实源并自动导出 `config.schema.json` / `/config/schema`。
+2. 新建 `com.acid.wechat.features.XxxFeature : AcidFeature`，绑定 `override val spec = ConfigSchema.XXX` 与 `extraOptions()`（通过 `FeatureOption.from(...)` 复用定义，不重复写默认值）。
 3. 如需访问微信新表结构，先在 `wechat/` 下沉淀仓储方法；如需要无版本依赖的 DEX 符号，在 `registerDexRules()` 注册 `DexKitLocator` 规则。
 4. 如需在微信页面内弹出交互窗口，**一律复用 `AcidModal.show(activity, AcidModalSpec(...))`** 拼装标准积木块（`Preview` / `RandomCountBar` / `Checklist` / `TextInput` / `NumberInput` / `Toggle`），禁止为新功能重复造独立弹窗 HTML。
-5. 在 `HookEntry.bootstrap()` 注册一次即可自动接入 DexKit、配置持久化、WebView 设置页与 Debug 接口。
+5. 在 `HookEntry.bootstrap()` 注册一次即可自动接入 DexKit、JSON 热重载配置持久化、WebView 设置页与 Debug 接口。
 
 ---
 
@@ -63,4 +63,4 @@ HookEntry (模块入口与生命周期编排)
 #   /storage/emulated/0/Download/Acid-WeChat.apk
 ```
 
-本地调试端点（默认 `http://127.0.0.1:19898`）：`/health`、`/dexkit`、`/features`、`/config`、`/logs`。
+本地调试端点（默认 `http://127.0.0.1:19898`）：`/health`、`/dexkit`、`/features`、`/config`（支持 `GET` / `POST JSON`）、`/config/schema`、`/config/reset`、`/logs`。

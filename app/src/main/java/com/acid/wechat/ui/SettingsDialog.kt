@@ -15,6 +15,7 @@ import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
 import com.acid.wechat.core.AcidLogger
+import com.acid.wechat.core.ConfigSchema
 import com.acid.wechat.core.ConfigStore
 import com.acid.wechat.core.DexKitLocator
 import com.acid.wechat.core.FeatureCategory
@@ -64,6 +65,7 @@ object SettingsDialog {
     ) {
         @JavascriptInterface
         fun getState(): String {
+            ConfigStore.reloadIfModified(force = true)
             val dk = DexKitLocator.snapshotJson()
             val cats = JSONArray()
             for (cat in FeatureCategory.entries) {
@@ -86,32 +88,13 @@ object SettingsDialog {
                     put("dependsOn", f.dependsOn ?: JSONObject.NULL)
                 })
                 for (opt in f.extraOptions()) {
-                    items.put(JSONObject().apply {
-                        put("type", opt.type)
-                        put("category", f.category.id)
-                        put("group", opt.group)
-                        put("title", opt.title)
-                        put("configKey", opt.configKey)
-                        put("dependsOn", opt.dependsOn ?: JSONObject.NULL)
-                        if (opt.type == FeatureOption.TYPE_TEXT) {
-                            put("value", ConfigStore.getString(opt.configKey, opt.defaultText))
-                            put("placeholder", opt.placeholder)
-                        } else {
-                            put("enabled", ConfigStore.getBoolean(opt.configKey, opt.defaultValue))
-                        }
-                    })
+                    appendOptionItem(items, f.category.id, opt)
                 }
             }
 
-            items.put(JSONObject().apply {
-                put("type", FeatureOption.TYPE_SWITCH)
-                put("category", FeatureCategory.ME.id)
-                put("group", "系统调试")
-                put("title", "本地调试接口")
-                put("configKey", ConfigStore.KEY_DEBUG_SERVER)
-                put("enabled", ConfigStore.getBoolean(ConfigStore.KEY_DEBUG_SERVER, true))
-                put("dependsOn", JSONObject.NULL)
-            })
+            for (spec in ConfigSchema.systemUiSpecs()) {
+                appendOptionItem(items, spec.category.id, FeatureOption.from(spec))
+            }
 
             return JSONObject().apply {
                 put("hostVersion", HostContext.hostVersionName)
@@ -120,6 +103,23 @@ object SettingsDialog {
                 put("categories", cats)
                 put("items", items)
             }.toString()
+        }
+
+        private fun appendOptionItem(items: JSONArray, categoryId: String, opt: FeatureOption) {
+            items.put(JSONObject().apply {
+                put("type", opt.type)
+                put("category", categoryId)
+                put("group", opt.group)
+                put("title", opt.title)
+                put("configKey", opt.configKey)
+                put("dependsOn", opt.dependsOn ?: JSONObject.NULL)
+                if (opt.type == FeatureOption.TYPE_TEXT) {
+                    put("value", ConfigStore.getString(opt.configKey, opt.defaultText))
+                    put("placeholder", opt.placeholder)
+                } else {
+                    put("enabled", ConfigStore.getBoolean(opt.configKey, opt.defaultValue))
+                }
+            })
         }
 
         @JavascriptInterface

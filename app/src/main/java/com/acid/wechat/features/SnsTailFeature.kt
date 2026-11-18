@@ -2,9 +2,9 @@ package com.acid.wechat.features
 
 import com.acid.wechat.core.AcidFeature
 import com.acid.wechat.core.AcidLogger
+import com.acid.wechat.core.ConfigSchema
 import com.acid.wechat.core.ConfigStore
 import com.acid.wechat.core.DexKitLocator
-import com.acid.wechat.core.FeatureCategory
 import com.acid.wechat.core.FeatureOption
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.ReflectHelper
@@ -33,30 +33,11 @@ object SnsTailFeature : AcidFeature {
     private var cachedTimelineField: Field? = null
 
     override val id = "sns_tail"
-    override val name = "朋友圈小尾巴"
-    override val category = FeatureCategory.MOMENTS
-    override val group = "小尾巴"
-    override val description = "发布朋友圈时自动附带自定义机型或来源尾巴"
-    override val configKey = ConfigStore.KEY_SNS_TAIL_ENABLED
-    override val defaultEnabled = false
+    override val spec = ConfigSchema.SNS_TAIL_ENABLED
 
     override fun extraOptions(): List<FeatureOption> = listOf(
-        FeatureOption(
-            title = "尾巴内容",
-            configKey = ConfigStore.KEY_SNS_TAIL_TEXT,
-            group = group,
-            type = FeatureOption.TYPE_TEXT,
-            defaultText = ConfigStore.DEFAULT_SNS_TAIL_TEXT,
-            placeholder = ConfigStore.DEFAULT_SNS_TAIL_TEXT,
-            dependsOn = ConfigStore.KEY_SNS_TAIL_ENABLED,
-        ),
-        FeatureOption(
-            title = "作为位置来源显示",
-            configKey = ConfigStore.KEY_SNS_TAIL_AS_LOCATION,
-            group = group,
-            defaultValue = true,
-            dependsOn = ConfigStore.KEY_SNS_TAIL_ENABLED,
-        ),
+        FeatureOption.from(ConfigSchema.SNS_TAIL_TEXT),
+        FeatureOption.from(ConfigSchema.SNS_TAIL_AS_LOCATION),
     )
 
     override fun registerDexRules() {
@@ -87,19 +68,14 @@ object SnsTailFeature : AcidFeature {
     }
 
     private fun applyTail(packHelper: Any) {
-        val rawTail = ConfigStore.getString(ConfigStore.KEY_SNS_TAIL_TEXT, ConfigStore.DEFAULT_SNS_TAIL_TEXT)
+        val rawTail = ConfigStore.getString(ConfigSchema.SNS_TAIL_TEXT)
         val decodedTail = ConfigStore.decodeNewlines(rawTail).trim()
         if (decodedTail.isEmpty()) return
 
         runCatching {
             val tlField = resolveTimelineField(packHelper.javaClass) ?: return
             val tlObj = tlField.get(packHelper) ?: return
-            val asLocation = ConfigStore.isEffective(
-                ConfigStore.KEY_SNS_TAIL_AS_LOCATION,
-                true,
-                ConfigStore.KEY_SNS_TAIL_ENABLED,
-                parentDefault = false,
-            )
+            val asLocation = ConfigStore.isEffective(ConfigSchema.SNS_TAIL_AS_LOCATION)
 
             var applied = false
             if (asLocation) {
@@ -167,7 +143,7 @@ object SnsTailFeature : AcidFeature {
 
     override fun statusJson(): JSONObject = JSONObject().apply {
         put("appliedCount", appliedCount.get())
-        put("tailText", ConfigStore.getString(ConfigStore.KEY_SNS_TAIL_TEXT, ConfigStore.DEFAULT_SNS_TAIL_TEXT))
-        put("asLocation", ConfigStore.getBoolean(ConfigStore.KEY_SNS_TAIL_AS_LOCATION, true))
+        put("tailText", ConfigStore.getString(ConfigSchema.SNS_TAIL_TEXT))
+        put("asLocation", ConfigStore.getBoolean(ConfigSchema.SNS_TAIL_AS_LOCATION))
     }
 }

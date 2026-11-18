@@ -33,6 +33,35 @@ data class FeatureOption(
     companion object {
         const val TYPE_SWITCH = "switch"
         const val TYPE_TEXT = "text"
+
+        fun from(spec: ConfigSchema.SettingSpec<*>): FeatureOption = when (spec) {
+            is ConfigSchema.BoolSpec -> FeatureOption(
+                title = spec.title,
+                configKey = spec.key,
+                group = spec.group,
+                type = TYPE_SWITCH,
+                defaultValue = spec.defaultValue,
+                dependsOn = spec.dependsOn,
+            )
+            is ConfigSchema.StringSpec -> FeatureOption(
+                title = spec.title,
+                configKey = spec.key,
+                group = spec.group,
+                type = TYPE_TEXT,
+                defaultText = spec.defaultValue,
+                placeholder = spec.placeholder,
+                dependsOn = spec.dependsOn,
+            )
+            is ConfigSchema.IntSpec -> FeatureOption(
+                title = spec.title,
+                configKey = spec.key,
+                group = spec.group,
+                type = TYPE_TEXT,
+                defaultText = spec.defaultValue.toString(),
+                placeholder = spec.defaultValue.toString(),
+                dependsOn = spec.dependsOn,
+            )
+        }
     }
 }
 
@@ -41,13 +70,14 @@ data class FeatureOption(
  */
 interface AcidFeature {
     val id: String
-    val name: String
-    val category: FeatureCategory
-    val group: String
-    val description: String
-    val configKey: String
-    val defaultEnabled: Boolean get() = true
-    val dependsOn: String? get() = null
+    val spec: ConfigSchema.BoolSpec? get() = null
+    val name: String get() = spec?.title ?: id
+    val category: FeatureCategory get() = spec?.category ?: FeatureCategory.CHAT
+    val group: String get() = spec?.group ?: "通用"
+    val description: String get() = spec?.description ?: ""
+    val configKey: String get() = spec?.key ?: id
+    val defaultEnabled: Boolean get() = spec?.defaultValue ?: true
+    val dependsOn: String? get() = spec?.dependsOn
 
     fun extraOptions(): List<FeatureOption> = emptyList()
     fun registerDexRules() {}
@@ -128,6 +158,7 @@ object FeatureRegistry {
     fun allStates(): List<FeatureState> = states.toList()
 
     fun snapshotJson(): JSONArray {
+        ConfigStore.reloadIfModified(force = true)
         val arr = JSONArray()
         for (st in states) {
             val f = st.feature

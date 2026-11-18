@@ -3,9 +3,9 @@ package com.acid.wechat.features
 import android.content.ContentValues
 import com.acid.wechat.core.AcidFeature
 import com.acid.wechat.core.AcidLogger
+import com.acid.wechat.core.ConfigSchema
 import com.acid.wechat.core.ConfigStore
 import com.acid.wechat.core.DexKitLocator
-import com.acid.wechat.core.FeatureCategory
 import com.acid.wechat.core.FeatureOption
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.MsgNoticeHelper
@@ -29,29 +29,11 @@ object AntiRecallFeature : AcidFeature {
     private const val MAX_ROW_CACHE = 400
 
     override val id = "anti_recall"
-    override val name = "消息防撤回"
-    override val category = FeatureCategory.CHAT
-    override val group = "防止撤回"
-    override val description = "拦截对方撤回消息并保留原内容"
-    override val configKey = ConfigStore.KEY_ANTI_RECALL
+    override val spec = ConfigSchema.ANTI_RECALL
 
     override fun extraOptions(): List<FeatureOption> = listOf(
-        FeatureOption(
-            title = "撤回本地提示",
-            configKey = ConfigStore.KEY_ANTI_RECALL_NOTICE,
-            group = group,
-            defaultValue = true,
-            dependsOn = ConfigStore.KEY_ANTI_RECALL,
-        ),
-        FeatureOption(
-            title = "撤回提示文案",
-            configKey = ConfigStore.KEY_ANTI_RECALL_NOTICE_TEXT,
-            group = group,
-            type = FeatureOption.TYPE_TEXT,
-            defaultText = ConfigStore.DEFAULT_RECALL_NOTICE_TEXT,
-            placeholder = ConfigStore.DEFAULT_RECALL_NOTICE_TEXT,
-            dependsOn = ConfigStore.KEY_ANTI_RECALL_NOTICE,
-        ),
+        FeatureOption.from(ConfigSchema.ANTI_RECALL_NOTICE),
+        FeatureOption.from(ConfigSchema.ANTI_RECALL_NOTICE_TEXT),
     )
 
     private lateinit var ruleDoRevokeMsg: DexKitLocator.DexRule
@@ -88,7 +70,7 @@ object AntiRecallFeature : AcidFeature {
     }
 
     private fun isNoticeEffective(): Boolean =
-        ConfigStore.isEffective(ConfigStore.KEY_ANTI_RECALL_NOTICE, true, ConfigStore.KEY_ANTI_RECALL)
+        ConfigStore.isEffective(ConfigSchema.ANTI_RECALL_NOTICE)
 
     private fun hookPrimaryDoRevokeMsg() {
         val method = ruleDoRevokeMsg.resolveMethod()
@@ -219,10 +201,7 @@ object AntiRecallFeature : AcidFeature {
     ) {
         val quotedHint = nameQuoteRegex.find(replaceText)?.groupValues?.getOrNull(1)
         val sender = ChatRepository.resolveSenderDisplayName(talker, originalContent, quotedHint)
-        val rawTemplate = ConfigStore.getString(
-            ConfigStore.KEY_ANTI_RECALL_NOTICE_TEXT,
-            ConfigStore.DEFAULT_RECALL_NOTICE_TEXT,
-        ).ifEmpty { ConfigStore.DEFAULT_RECALL_NOTICE_TEXT }
+        val rawTemplate = ConfigStore.getString(ConfigSchema.ANTI_RECALL_NOTICE_TEXT)
         val text = ConfigStore.decodeNewlines(rawTemplate).replace("{name}", sender)
         MsgNoticeHelper.insertSystemNotice(talker = talker, noticeText = text, createTimeMs = noticeTimeMs)
     }

@@ -4,8 +4,7 @@ import android.app.Activity
 import android.widget.Toast
 import com.acid.wechat.core.AcidFeature
 import com.acid.wechat.core.AcidLogger
-import com.acid.wechat.core.ConfigStore
-import com.acid.wechat.core.FeatureCategory
+import com.acid.wechat.core.ConfigSchema
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.WcdbBridge
 import com.acid.wechat.ui.overlay.AcidModal
@@ -39,11 +38,7 @@ object FakeSnsCommentFeature : AcidFeature, SnsContextMenuHook.Provider {
     private val appliedCount = AtomicInteger(0)
 
     override val id = "fake_comment"
-    override val name = "朋友圈伪评论"
-    override val category = FeatureCategory.MOMENTS
-    override val group = "伪评论"
-    override val description = "长按朋友圈菜单增加「伪评论」，指定好友与内容添加到本地评论区"
-    override val configKey = ConfigStore.KEY_FAKE_COMMENT_ENABLED
+    override val spec = ConfigSchema.FAKE_COMMENT_ENABLED
 
     override fun registerDexRules() {
         SnsContextMenuHook.registerDexRules()
