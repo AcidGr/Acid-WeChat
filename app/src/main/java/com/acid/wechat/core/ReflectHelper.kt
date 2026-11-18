@@ -1,5 +1,8 @@
 package com.acid.wechat.core
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 
@@ -58,6 +61,29 @@ object ReflectHelper {
         while (cur != null) {
             runCatching {
                 return cur.getDeclaredField(name).apply { isAccessible = true }
+            }
+            cur = cur.superclass
+        }
+        return null
+    }
+
+    fun unwrapActivity(ctx: Context?): Activity? {
+        var cur = ctx
+        while (cur is ContextWrapper) {
+            if (cur is Activity) return cur
+            cur = cur.baseContext
+        }
+        return null
+    }
+
+    fun findActivityField(obj: Any): Activity? {
+        var cur: Class<*>? = obj.javaClass
+        while (cur != null && cur != Any::class.java) {
+            for (f in cur.declaredFields) {
+                if (Activity::class.java.isAssignableFrom(f.type)) {
+                    f.isAccessible = true
+                    (f.get(obj) as? Activity)?.let { return it }
+                }
             }
             cur = cur.superclass
         }

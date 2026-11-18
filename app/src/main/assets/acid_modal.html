@@ -415,14 +415,16 @@
           </div>
         `);
       } else if (b.type === "checklist") {
-        html.push(`
-          <div class="section">
-            <div class="search-row">
-              <input class="search-input" type="text" placeholder="${escapeHtml(b.searchPlaceholder)}" oninput="onSearchInput('${escapeAttr(b.key)}', this.value)" />
-              ${b.multiSelect ? `<button class="pill-btn" id="filter_${escapeAttr(b.key)}" onclick="toggleFilterSelected('${escapeAttr(b.key)}')">${escapeHtml(b.filterSelectedLabel)}</button>` : ""}
+        if (b.showSearch !== false || b.multiSelect) {
+          html.push(`
+            <div class="section">
+              <div class="search-row">
+                ${b.showSearch !== false ? `<input class="search-input" type="text" placeholder="${escapeHtml(b.searchPlaceholder)}" oninput="onSearchInput('${escapeAttr(b.key)}', this.value)" />` : ""}
+                ${b.multiSelect ? `<button class="pill-btn" id="filter_${escapeAttr(b.key)}" onclick="toggleFilterSelected('${escapeAttr(b.key)}')">${escapeHtml(b.filterSelectedLabel)}</button>` : ""}
+              </div>
             </div>
-          </div>
-        `);
+          `);
+        }
       } else if (b.type === "text_input") {
         html.push(`
           <div class="section">
@@ -474,8 +476,13 @@
       .replace(/\{total\}/g, String(total));
 
     headerEl.textContent = primaryChecklist.headerTemplate ? formatTpl(primaryChecklist.headerTemplate) : (spec.subtitle || "");
-    footerEl.style.display = "block";
-    footerEl.textContent = formatTpl(primaryChecklist.footerTemplate || "已选 {selected}");
+    if (primaryChecklist.footerTemplate === "") {
+      footerEl.textContent = "";
+      footerEl.style.display = "none";
+    } else {
+      footerEl.style.display = "block";
+      footerEl.textContent = formatTpl(primaryChecklist.footerTemplate || "已选 {selected}");
+    }
   }
 
   function onFieldInput(key, val) {

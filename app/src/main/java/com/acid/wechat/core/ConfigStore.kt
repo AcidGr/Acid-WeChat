@@ -17,6 +17,8 @@ object ConfigStore {
     const val KEY_ANTI_RECALL = "anti_recall"
     const val KEY_ANTI_RECALL_NOTICE = "anti_recall_notice"
     const val KEY_ANTI_RECALL_NOTICE_TEXT = "anti_recall_notice_text"
+    const val KEY_CUSTOM_JSB = "custom_jsb"
+    const val KEY_CUSTOM_DICE = "custom_dice"
     const val KEY_ANTI_MOMENTS_DELETE = "anti_moments_delete"
     const val KEY_MOMENTS_DELETE_PREFIX = "moments_delete_prefix"
     const val KEY_FAKE_LIKE_ENABLED = "fake_like_enabled"
@@ -61,6 +63,8 @@ object ConfigStore {
         map.putIfAbsent(KEY_ANTI_RECALL, true)
         map.putIfAbsent(KEY_ANTI_RECALL_NOTICE, true)
         map.putIfAbsent(KEY_ANTI_RECALL_NOTICE_TEXT, DEFAULT_RECALL_NOTICE_TEXT)
+        map.putIfAbsent(KEY_CUSTOM_JSB, true)
+        map.putIfAbsent(KEY_CUSTOM_DICE, true)
         map.putIfAbsent(KEY_ANTI_MOMENTS_DELETE, true)
         map.putIfAbsent(KEY_MOMENTS_DELETE_PREFIX, DEFAULT_MOMENTS_DELETE_PREFIX)
         map.putIfAbsent(KEY_FAKE_LIKE_ENABLED, true)

@@ -1,8 +1,6 @@
 package com.acid.wechat.features
 
 import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import android.view.ContextMenu
 import android.view.MenuItem
 import android.view.View
@@ -14,6 +12,7 @@ import com.acid.wechat.core.DexKitLocator
 import com.acid.wechat.core.FeatureCategory
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.ProtoLite
+import com.acid.wechat.core.ReflectHelper
 import com.acid.wechat.core.WcdbBridge
 import com.acid.wechat.ui.overlay.AcidModal
 import com.acid.wechat.ui.overlay.AcidModalSpec
@@ -129,7 +128,7 @@ object FakeSnsLikeFeature : AcidFeature {
                     val menu = param.args?.getOrNull(0) as? ContextMenu ?: return
                     val view = param.args?.getOrNull(1) as? View
                     val snsId = (latestMenuSnsId.takeIf { it != 0L } ?: view?.let { viewSnsIds[it] })
-                        ?: unwrapActivity(view?.context)?.let(SnsRepository::extractSnsIdFromIntent)
+                        ?: ReflectHelper.unwrapActivity(view?.context)?.let(SnsRepository::extractSnsIdFromIntent)
                         ?: 0L
                     val hasFakeLikes = snsId != 0L && SnsFakeLikeStore.getUsernames(snsId).isNotEmpty()
                     if (hasFakeLikes) {
@@ -157,7 +156,7 @@ object FakeSnsLikeFeature : AcidFeature {
                     val view = param.args?.getOrNull(0) as? View
                     val snsTableId = param.args?.getOrNull(1) as? String
                     val tlObj = param.args?.getOrNull(2)
-                    val activity = unwrapActivity(view?.context) ?: findActivityField(listener)
+                    val activity = ReflectHelper.unwrapActivity(view?.context) ?: ReflectHelper.findActivityField(listener)
                     val snsId = SnsRepository.resolveSnsId(tlObj, snsTableId, activity) ?: return
                     selectedPosts[listener] = SelectedPostContext(snsId, activity)
                     if (view != null) viewSnsIds[view] = snsId
@@ -183,7 +182,7 @@ object FakeSnsLikeFeature : AcidFeature {
                     param.result = null
                     val listener = param.thisObject ?: return
                     val ctx = selectedPosts[listener]
-                    val activity = ctx?.activity ?: findActivityField(listener)
+                    val activity = ctx?.activity ?: ReflectHelper.findActivityField(listener)
                     val snsId = ctx?.snsId ?: activity?.let(SnsRepository::extractSnsIdFromIntent)
                     if (activity == null || snsId == null || snsId == 0L) {
                         AcidLogger.w(TAG, "cannot handle menu action: activity=$activity snsId=$snsId")
@@ -353,29 +352,6 @@ object FakeSnsLikeFeature : AcidFeature {
                 AcidLogger.w(TAG, "sync preserve fake likes failed", it)
             }
         }
-    }
-
-    private fun unwrapActivity(ctx: Context?): Activity? {
-        var cur = ctx
-        while (cur is ContextWrapper) {
-            if (cur is Activity) return cur
-            cur = cur.baseContext
-        }
-        return null
-    }
-
-    private fun findActivityField(obj: Any): Activity? {
-        var cur: Class<*>? = obj.javaClass
-        while (cur != null && cur != Any::class.java) {
-            for (f in cur.declaredFields) {
-                if (Activity::class.java.isAssignableFrom(f.type)) {
-                    f.isAccessible = true
-                    (f.get(obj) as? Activity)?.let { return it }
-                }
-            }
-            cur = cur.superclass
-        }
-        return null
     }
 
     override fun statusJson(): JSONObject = JSONObject().apply {

@@ -68,6 +68,7 @@ object AcidModal {
                     obj.put("type", "checklist")
                     obj.put("key", block.key)
                     obj.put("multiSelect", block.multiSelect)
+                    obj.put("showSearch", block.showSearch)
                     obj.put("searchPlaceholder", block.searchPlaceholder)
                     obj.put("filterSelectedLabel", block.filterSelectedLabel)
                     obj.put("emptyText", block.emptyText)

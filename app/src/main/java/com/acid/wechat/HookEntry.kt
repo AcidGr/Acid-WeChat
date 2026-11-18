@@ -11,6 +11,7 @@ import com.acid.wechat.core.WcdbBridge
 import com.acid.wechat.debug.DebugServer
 import com.acid.wechat.features.AntiMomentsPostFeature
 import com.acid.wechat.features.AntiRecallFeature
+import com.acid.wechat.features.CustomGameEmojiFeature
 import com.acid.wechat.features.FakeSnsLikeFeature
 import com.acid.wechat.ui.SettingsHook
 import de.robv.android.xposed.IXposedHookLoadPackage
@@ -76,6 +77,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             // Register features & DexKit rules
             MsgNoticeHelper.registerDexRules()
             FeatureRegistry.register(AntiRecallFeature)
+            FeatureRegistry.register(CustomGameEmojiFeature)
             FeatureRegistry.register(AntiMomentsPostFeature)
             FeatureRegistry.register(FakeSnsLikeFeature)
             FeatureRegistry.registerAllDexRules()

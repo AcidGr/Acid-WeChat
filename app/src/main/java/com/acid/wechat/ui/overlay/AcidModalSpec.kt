@@ -41,6 +41,7 @@ sealed class ModalBlock {
         val key: String,
         val items: List<ChecklistItem>,
         val multiSelect: Boolean = true,
+        val showSearch: Boolean = true,
         val searchPlaceholder: String = "搜索",
         val filterSelectedLabel: String = "已选",
         val emptyText: String = "暂无可选项",
