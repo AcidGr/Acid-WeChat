@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>朋友圈伪集赞</title>
+<style>
+  :root {
+    --bg: #FFFFFF;
+    --sub-bg: #F6F7F9;
+    --text: #111827;
+    --muted: #8E95A2;
+    --line: #ECEEF2;
+    --accent: #07C160;
+    --accent-soft: #EAF9F0;
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  input, select {
+    user-select: text;
+    -webkit-user-select: text;
+    font-family: inherit;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans", "Helvetica Neue", sans-serif;
+    height: 100%;
+    overflow: hidden;
+  }
+  .sheet {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .handle-wrap {
+    padding-top: 8px;
+    display: flex;
+    justify-content: center;
+  }
+  .handle {
+    width: 36px;
+    height: 4px;
+    border-radius: 999px;
+    background: #E2E5EA;
+  }
+  .header {
+    padding: 10px 16px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+  }
+  .title-wrap {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .title {
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .stat {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .close-btn {
+    border: none;
+    background: var(--sub-bg);
+    color: #374151;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 5px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .section {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--line);
+  }
+  .post-select {
+    width: 100%;
+    border: 1px solid #E5E7EB;
+    background: var(--sub-bg);
+    color: var(--text);
+    font-size: 13px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    outline: none;
+  }
+  .rand-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .rand-input {
+    width: 64px;
+    border: 1px solid #E5E7EB;
+    background: var(--sub-bg);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+    text-align: center;
+    padding: 6px 6px;
+    border-radius: 8px;
+    outline: none;
+  }
+  .rand-input:focus, .search-input:focus {
+    border-color: var(--accent);
+    background: #FFFFFF;
+  }
+  .pill-btn {
+    border: 1px solid #E5E7EB;
+    background: #FFFFFF;
+    color: #374151;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 6px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .pill-btn:active {
+    background: var(--sub-bg);
+  }
+  .pill-btn.primary-soft {
+    border-color: #BBEBD0;
+    background: var(--accent-soft);
+    color: #06A853;
+    font-weight: 600;
+  }
+  .pill-btn.active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    color: #06A853;
+    font-weight: 600;
+  }
+  .search-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .search-input {
+    flex: 1;
+    border: 1px solid #E5E7EB;
+    background: var(--sub-bg);
+    color: var(--text);
+    font-size: 13px;
+    padding: 7px 11px;
+    border-radius: 9px;
+    outline: none;
+  }
+  .friend-list {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .friend-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 16px;
+    border-bottom: 1px solid #F3F4F6;
+    cursor: pointer;
+  }
+  .friend-row:active {
+    background: #FAFAFB;
+  }
+  .friend-row.locked {
+    cursor: default;
+    opacity: 0.72;
+  }
+  .friend-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+  }
+  .avatar {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--sub-bg);
+    color: #4B5563;
+    font-size: 13px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .friend-names {
+    min-width: 0;
+  }
+  .friend-name {
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .friend-sub {
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .badge-real {
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: #F3F4F6;
+    color: #6B7280;
+    flex-shrink: 0;
+  }
+  .check {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1.8px solid #D1D5DB;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: all 0.14s ease;
+  }
+  .check.on {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .check svg {
+    width: 13px;
+    height: 13px;
+    stroke: #FFFFFF;
+    stroke-width: 2.6;
+    fill: none;
+    display: none;
+  }
+  .check.on svg {
+    display: block;
+  }
+  .footer {
+    padding: 10px 16px 14px;
+    border-top: 1px solid var(--line);
+    background: #FFFFFF;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .footer-info {
+    font-size: 12.5px;
+    color: #4B5563;
+    white-space: nowrap;
+  }
+  .apply-btn {
+    flex: 1;
+    border: none;
+    background: var(--accent);
+    color: #FFFFFF;
+    font-size: 14.5px;
+    font-weight: 600;
+    padding: 11px 16px;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .apply-btn:active {
+    background: #06AD56;
+  }
+  .empty {
+    padding: 40px 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 13.5px;
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="handle-wrap"><div class="handle"></div></div>
+  <div class="header">
+    <div class="title-wrap">
+      <span class="title">朋友圈伪集赞</span>
+      <span class="stat" id="headerStat">加载中...</span>
+    </div>
+    <button class="close-btn" onclick="closeSheet()">关闭</button>
+  </div>
+
+  <div class="section">
+    <select class="post-select" id="postSelect" onchange="onPostChanged()"></select>
+  </div>
+
+  <div class="section">
+    <div class="rand-row">
+      <input class="rand-input" id="randCount" type="number" min="1" max="999" value="10" />
+      <button class="pill-btn" onclick="setRandAndPick(10)">10</button>
+      <button class="pill-btn" onclick="setRandAndPick(20)">20</button>
+      <button class="pill-btn" onclick="setRandAndPick(50)">50</button>
+      <button class="pill-btn primary-soft" onclick="pickRandom()">随机勾选</button>
+      <button class="pill-btn" onclick="clearFake()">清空</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="search-row">
+      <input class="search-input" id="searchInput" type="text" placeholder="搜索好友备注 / 昵称" oninput="renderFriends()" />
+      <button class="pill-btn" id="filterSelectedBtn" onclick="toggleSelectedFilter()">已选</button>
+    </div>
+  </div>
+
+  <div class="friend-list" id="friendList"></div>
+
+  <div class="footer">
+    <div class="footer-info" id="footerInfo">伪赞 0</div>
+    <button class="apply-btn" onclick="applyNow()">应用集赞</button>
+  </div>
+</div>
+
+<script>
+  let data = { targetSnsId: null, posts: [], friends: [] };
+  let currentSnsId = "";
+  let selectedSet = new Set();
+  let realSet = new Set();
+  let onlySelected = false;
+
+  function init() {
+    try {
+      const raw = window.FakeLikeBridge.getData();
+      data = JSON.parse(raw);
+      renderPosts();
+      renderFriends();
+    } catch (e) {
+      document.getElementById("friendList").innerHTML = '<div class="empty">加载失败</div>';
+    }
+  }
+
+  function renderPosts() {
+    const sel = document.getElementById("postSelect");
+    if (!data.posts || data.posts.length === 0) {
+      sel.innerHTML = '<option value="">暂无本地朋友圈缓存，请先浏览朋友圈</option>';
+      currentSnsId = "";
+      updateStats();
+      return;
+    }
+    sel.innerHTML = data.posts.map(p =>
+      `<option value="${escapeHtml(p.snsId)}">${escapeHtml(p.author)} · ${escapeHtml(p.caption)} (${p.totalLikes}赞)</option>`
+    ).join("");
+
+    const preferred = data.targetSnsId && data.posts.some(p => p.snsId === data.targetSnsId)
+      ? data.targetSnsId
+      : data.posts[0].snsId;
+    sel.value = preferred;
+    loadPostSelection(preferred);
+  }
+
+  function onPostChanged() {
+    loadPostSelection(document.getElementById("postSelect").value);
+    renderFriends();
+  }
+
+  function loadPostSelection(snsId) {
+    currentSnsId = snsId;
+    const post = data.posts.find(p => p.snsId === snsId);
+    realSet = new Set(post ? (post.realUsers || []) : []);
+    selectedSet = new Set(post ? (post.fakeUsers || []) : []);
+    updateStats();
+  }
+
+  function updateStats() {
+    const fakeCnt = selectedSet.size;
+    const realCnt = realSet.size;
+    const total = fakeCnt + realCnt;
+    document.getElementById("headerStat").textContent = `真赞 ${realCnt} · 合计 ${total}`;
+    document.getElementById("footerInfo").textContent = `伪赞 ${fakeCnt} · 共 ${total}`;
+  }
+
+  function toggleSelectedFilter() {
+    onlySelected = !onlySelected;
+    document.getElementById("filterSelectedBtn").classList.toggle("active", onlySelected);
+    renderFriends();
+  }
+
+  function setRandAndPick(n) {
+    document.getElementById("randCount").value = n;
+    pickRandom();
+  }
+
+  function pickRandom() {
+    const n = parseInt(document.getElementById("randCount").value, 10);
+    if (!n || n <= 0) return;
+    const pool = data.friends.filter(f => !realSet.has(f.username));
+    for (let i = pool.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [pool[i], pool[j]] = [pool[j], pool[i]];
+    }
+    selectedSet = new Set(pool.slice(0, Math.min(n, pool.length)).map(f => f.username));
+    updateStats();
+    renderFriends();
+  }
+
+  function clearFake() {
+    selectedSet.clear();
+    updateStats();
+    renderFriends();
+  }
+
+  function toggleFriend(username) {
+    if (realSet.has(username)) return;
+    if (selectedSet.has(username)) {
+      selectedSet.delete(username);
+    } else {
+      selectedSet.add(username);
+    }
+    updateStats();
+    renderFriends();
+  }
+
+  function renderFriends() {
+    const el = document.getElementById("friendList");
+    if (!data.friends || data.friends.length === 0) {
+      el.innerHTML = '<div class="empty">暂未获取到好友列表，请先打开任意聊天或通讯录</div>';
+      return;
+    }
+    const q = (document.getElementById("searchInput").value || "").trim().toLowerCase();
+    const list = data.friends.filter(f => {
+      if (onlySelected && !selectedSet.has(f.username)) return false;
+      if (!q) return true;
+      return f.displayName.toLowerCase().includes(q) ||
+        (f.subName && f.subName.toLowerCase().includes(q)) ||
+        f.username.toLowerCase().includes(q);
+    });
+    if (list.length === 0) {
+      el.innerHTML = '<div class="empty">无匹配好友</div>';
+      return;
+    }
+    el.innerHTML = list.map(f => {
+      const isReal = realSet.has(f.username);
+      const isChecked = selectedSet.has(f.username);
+      const initial = escapeHtml((f.displayName || "?").slice(0, 1));
+      const subHtml = f.subName ? `<div class="friend-sub">${escapeHtml(f.subName)}</div>` : "";
+      const rightHtml = isReal
+        ? '<span class="badge-real">已真赞</span>'
+        : `<div class="check ${isChecked ? 'on' : ''}"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg></div>`;
+      return `
+        <div class="friend-row ${isReal ? 'locked' : ''}" onclick="toggleFriend('${escapeAttr(f.username)}')">
+          <div class="friend-main">
+            <div class="avatar">${initial}</div>
+            <div class="friend-names">
+              <div class="friend-name">${escapeHtml(f.displayName)}</div>
+              ${subHtml}
+            </div>
+          </div>
+          ${rightHtml}
+        </div>
+      `;
+    }).join("");
+  }
+
+  function applyNow() {
+    if (!currentSnsId) return;
+    try {
+      window.FakeLikeBridge.applyFakeLikes(currentSnsId, JSON.stringify(Array.from(selectedSet)));
+    } catch (_) {}
+  }
+
+  function closeSheet() {
+    try { window.FakeLikeBridge.close(); } catch (_) {}
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function escapeAttr(s) {
+    return String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  }
+
+  init();
+</script>
+</body>
+</html>

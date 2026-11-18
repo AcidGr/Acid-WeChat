@@ -11,7 +11,9 @@ import com.acid.wechat.core.WcdbBridge
 import com.acid.wechat.debug.DebugServer
 import com.acid.wechat.features.AntiMomentsPostFeature
 import com.acid.wechat.features.AntiRecallFeature
+import com.acid.wechat.features.FakeSnsLikeFeature
 import com.acid.wechat.ui.SettingsHook
+import com.acid.wechat.ui.overlay.FloatingEntryHost
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.IXposedHookZygoteInit
 import de.robv.android.xposed.XC_MethodHook
@@ -70,12 +72,14 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             // Initialize version-agnostic bridges & Settings UI first
             WcdbBridge.init()
             SettingsHook.init()
+            FloatingEntryHost.attach(app)
             DebugServer.startIfEnabled()
 
             // Register features & DexKit rules
             MsgNoticeHelper.registerDexRules()
             FeatureRegistry.register(AntiRecallFeature)
             FeatureRegistry.register(AntiMomentsPostFeature)
+            FeatureRegistry.register(FakeSnsLikeFeature)
             FeatureRegistry.registerAllDexRules()
 
             // Resolve DexKit (instant on cache hit; scans once per WeChat version/Tinker change)

@@ -9,6 +9,20 @@ import com.acid.wechat.core.WcdbBridge
  */
 object ChatRepository {
     private val genericPlaceholders = setOf("对方", "You", "you")
+    private val systemUsernames = setOf(
+        "filehelper", "weixin", "fmessage", "medianote", "floatbottle",
+        "qmessage", "qqmail", "newsapp", "weibo", "tmessage", "lbsapp",
+        "shakeapp", "bottleapp", "feedsapp", "voipapp", "officialaccounts",
+        "notification_messages", "helper_entry", "qqsync", "blogapp",
+    )
+
+    data class ContactSummary(
+        val username: String,
+        val displayName: String,
+        val nickname: String,
+        val remark: String,
+        val alias: String,
+    )
 
     fun queryIsSendBySvrId(msgSvrId: Long): Boolean? {
         val cursor = WcdbBridge.rawQuery(
@@ -78,6 +92,37 @@ object ChatRepository {
             else Triple(it.getString(0), it.getString(1), it.getString(2))
         }
     }.getOrNull()
+
+    /**
+     * Queries added personal contacts (excluding chatrooms, official accounts, and built-in system entries).
+     */
+    fun queryFriends(limit: Int = 1000): List<ContactSummary> = runCatching {
+        val cursor = WcdbBridge.rawQuery(
+            "SELECT username, conRemark, nickname, alias FROM rcontact " +
+                "WHERE (type & 1) != 0 AND verifyFlag = 0 " +
+                "AND username NOT LIKE '%@chatroom' " +
+                "AND username NOT LIKE 'gh_%' " +
+                "AND username NOT LIKE '%@app' " +
+                "AND username NOT LIKE '%@stranger' " +
+                "ORDER BY CASE WHEN conRemark IS NOT NULL AND conRemark != '' THEN conRemark ELSE nickname END COLLATE NOCASE ASC " +
+                "LIMIT ?",
+            arrayOf(limit.toString()),
+        ) ?: return@runCatching emptyList()
+
+        val result = mutableListOf<ContactSummary>()
+        cursor.use { c ->
+            while (c.moveToNext()) {
+                val username = c.getString(0)?.trim().orEmpty()
+                if (username.isEmpty() || username in systemUsernames) continue
+                val remark = c.getString(1)?.trim().orEmpty()
+                val nickname = c.getString(2)?.trim().orEmpty()
+                val alias = c.getString(3)?.trim().orEmpty()
+                val display = firstNonBlank(remark, nickname, alias, username) ?: username
+                result += ContactSummary(username, display, nickname, remark, alias)
+            }
+        }
+        result
+    }.getOrDefault(emptyList())
 
     private fun extractGroupSenderWxid(content: String?): String? {
         if (content.isNullOrEmpty()) return null

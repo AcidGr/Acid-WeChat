@@ -52,4 +52,15 @@ object ReflectHelper {
         val paramClasses = paramTypeNames.map { loadType(it, cl) }.toTypedArray()
         return cls.getDeclaredConstructor(*paramClasses).apply { isAccessible = true }
     }
+
+    fun findField(cls: Class<*>, name: String): java.lang.reflect.Field? {
+        var cur: Class<*>? = cls
+        while (cur != null) {
+            runCatching {
+                return cur.getDeclaredField(name).apply { isAccessible = true }
+            }
+            cur = cur.superclass
+        }
+        return null
+    }
 }

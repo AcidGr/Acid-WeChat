@@ -39,6 +39,10 @@ object WcdbBridge {
         private set
 
     @Volatile
+    var snsDb: Any? = null
+        private set
+
+    @Volatile
     var hookedInsertCount: Int = 0
         private set
 
@@ -122,22 +126,28 @@ object WcdbBridge {
     private fun recordDbInstance(db: Any?, table: String) {
         if (db == null) return
         lastDb = db
-        if (table == "message" || table == "rconversation") {
-            mainDb = db
-            return
-        }
-        if (mainDb == null) {
-            val path = runCatching {
-                db.javaClass.getMethod("getPath").invoke(db) as? String
-            }.getOrNull()
-            if (path != null && path.endsWith("EnMicroMsg.db")) {
+        when (table) {
+            "message", "rconversation", "rcontact" -> {
                 mainDb = db
+                return
             }
+            "SnsInfo", "SnsComment" -> {
+                snsDb = db
+                return
+            }
+        }
+        val path = runCatching {
+            db.javaClass.getMethod("getPath").invoke(db) as? String
+        }.getOrNull() ?: return
+        if (mainDb == null && path.endsWith("EnMicroMsg.db")) {
+            mainDb = db
+        } else if (snsDb == null && path.endsWith("SnsMicroMsg.db")) {
+            snsDb = db
         }
     }
 
-    private fun resolveMainDb(): Any? {
-        mainDb?.let { return it }
+    private fun resolveDbBySuffix(cached: Any?, suffix: String, cacheSetter: (Any) -> Unit): Any? {
+        cached?.let { return it }
         runCatching {
             val cls = Class.forName("com.tencent.wcdb.database.SQLiteDatabase", false, HostContext.classLoader)
             val field = cls.getDeclaredField("sActiveDatabases").apply { isAccessible = true }
@@ -146,18 +156,24 @@ object WcdbBridge {
                 for (db in active.keys) {
                     if (db == null) continue
                     val path = runCatching { db.javaClass.getMethod("getPath").invoke(db) as? String }.getOrNull()
-                    if (path != null && path.endsWith("EnMicroMsg.db")) {
-                        mainDb = db
+                    if (path != null && path.endsWith(suffix)) {
+                        cacheSetter(db)
                         return db
                     }
                 }
             }
         }
-        return lastDb
+        return if (suffix == "EnMicroMsg.db") lastDb else null
     }
 
-    fun rawQuery(sql: String, selectionArgs: Array<String>? = null): Cursor? {
-        val db = resolveMainDb() ?: return null
+    fun rawQuery(sql: String, selectionArgs: Array<String>? = null): Cursor? =
+        rawQueryOn(resolveDbBySuffix(mainDb, "EnMicroMsg.db") { mainDb = it }, sql, selectionArgs)
+
+    fun rawQuerySns(sql: String, selectionArgs: Array<String>? = null): Cursor? =
+        rawQueryOn(resolveDbBySuffix(snsDb, "SnsMicroMsg.db") { snsDb = it }, sql, selectionArgs)
+
+    private fun rawQueryOn(db: Any?, sql: String, selectionArgs: Array<String>?): Cursor? {
+        if (db == null) return null
         return runCatching {
             val methods = db.javaClass.methods.filter { it.name == "rawQuery" && it.parameterTypes.size == 2 }
             for (m in methods) {

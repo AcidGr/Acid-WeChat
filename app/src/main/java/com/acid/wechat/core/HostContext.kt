@@ -8,8 +8,8 @@ import java.io.File
  * Holds resolved host (WeChat) runtime metadata and module paths.
  */
 object HostContext {
-    const val MODULE_VERSION_NAME = "0.1.0-mvp"
-    const val MODULE_VERSION_CODE = 1
+    const val MODULE_VERSION_NAME = "0.2.0"
+    const val MODULE_VERSION_CODE = 2
     const val WECHAT_PACKAGE = "com.tencent.mm"
 
     @Volatile

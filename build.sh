@@ -10,5 +10,5 @@ else
   /opt/gradle/gradle-8.10.2/bin/gradle assembleRelease --no-daemon --console=plain
   APK="app/build/outputs/apk/release/app-release.apk"
 fi
-cp "$APK" /storage/emulated/0/Download/Acid-WeChat-mvp.apk
-ls -lh "$APK" /storage/emulated/0/Download/Acid-WeChat-mvp.apk
+cp "$APK" /storage/emulated/0/Download/Acid-WeChat.apk
+ls -lh "$APK" /storage/emulated/0/Download/Acid-WeChat.apk

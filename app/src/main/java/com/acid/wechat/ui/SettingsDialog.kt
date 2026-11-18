@@ -1,6 +1,5 @@
 package com.acid.wechat.ui
 
-import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
 import android.content.ClipData
@@ -13,7 +12,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
-import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.Toast
 import com.acid.wechat.core.AcidLogger
@@ -26,7 +24,6 @@ import com.acid.wechat.core.HostContext
 import com.acid.wechat.debug.DebugServer
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.zip.ZipFile
 
 /**
  * Clean, lightweight white WebView settings panel opened from WeChat Settings top-right "Acid".
@@ -34,77 +31,30 @@ import java.util.zip.ZipFile
 object SettingsDialog {
     private const val TAG = "SettingsDialog"
 
-    @Volatile
-    private var cachedHtml: String? = null
-
-    @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
     fun show(activity: Activity) {
-        if (activity.isFinishing || activity.isDestroyed) return
         runCatching {
-            val html = loadSettingsHtml() ?: run {
-                Toast.makeText(activity, "settings.html 加载失败", Toast.LENGTH_SHORT).show()
-                return
-            }
-
-            val dialog = Dialog(activity, android.R.style.Theme_DeviceDefault_Light_NoActionBar)
-            dialog.window?.apply {
-                setBackgroundDrawable(ColorDrawable(Color.WHITE))
-                setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
-                clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
-                @Suppress("DEPRECATION")
-                setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
-                statusBarColor = Color.WHITE
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    @Suppress("DEPRECATION")
-                    decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-                }
-            }
-
-            val webView = WebView(activity).apply {
-                setBackgroundColor(Color.WHITE)
-                overScrollMode = View.OVER_SCROLL_NEVER
-                isFocusable = true
-                isFocusableInTouchMode = true
-                settings.apply {
-                    javaScriptEnabled = true
-                    domStorageEnabled = true
-                    cacheMode = WebSettings.LOAD_NO_CACHE
-                }
-            }
-
-            val bridge = AcidBridge(activity, dialog, webView)
-            webView.addJavascriptInterface(bridge, "AcidBridge")
-            webView.loadDataWithBaseURL("https://acid.local/", html, "text/html", "UTF-8", null)
-
-            dialog.setOnDismissListener {
-                runCatching {
-                    webView.removeJavascriptInterface("AcidBridge")
-                    webView.stopLoading()
-                    webView.destroy()
-                }
-            }
-
-            dialog.setContentView(webView)
-            dialog.show()
+            WebViewHost.showHtmlDialog(
+                activity = activity,
+                assetPath = "assets/settings.html",
+                bridgeName = "AcidBridge",
+                styleResId = android.R.style.Theme_DeviceDefault_Light_NoActionBar,
+                windowSetup = { dialog ->
+                    dialog.window?.apply {
+                        setBackgroundDrawable(ColorDrawable(Color.WHITE))
+                        setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                        addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)
+                        statusBarColor = Color.WHITE
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            @Suppress("DEPRECATION")
+                            decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        }
+                    }
+                },
+                bridgeFactory = { dialog, webView -> AcidBridge(activity, dialog, webView) },
+            )
         }.onFailure {
             AcidLogger.e(TAG, "show SettingsDialog failed", it)
         }
-    }
-
-    private fun loadSettingsHtml(): String? {
-        cachedHtml?.let { return it }
-        val modPath = HostContext.modulePath
-        if (modPath.isBlank()) return null
-        return runCatching {
-            ZipFile(modPath).use { zip ->
-                val entry = zip.getEntry("assets/settings.html")
-                    ?: error("assets/settings.html not found in $modPath")
-                zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
-            }.also { cachedHtml = it }
-        }.onFailure {
-            AcidLogger.e(TAG, "loadSettingsHtml failed", it)
-        }.getOrNull()
     }
 
     private class AcidBridge(
