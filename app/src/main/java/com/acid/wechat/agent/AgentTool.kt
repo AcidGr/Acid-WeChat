@@ -4,18 +4,34 @@ import com.acid.wechat.core.AcidLogger
 import org.json.JSONArray
 import org.json.JSONObject
 
+data class ToolPolicy(
+    val isAdmin: Boolean = true,
+    val currentTalker: String? = null,
+    val allowSendMessage: Boolean = isAdmin && (currentTalker == null || currentTalker == AgentSessionModels.GLOBAL_TALKER),
+    val allowedImagePaths: Set<String> = emptySet(),
+)
+
+data class ImageAttachment(
+    val dataUrl: String,
+    val displayPath: String,
+    val mimeType: String,
+)
+
 /**
  * Declarative contract and OpenAI-compatible schema registry for Agent tools.
  */
 interface AgentTool {
     val name: String
     fun buildOpenAiSchema(): JSONObject
+    fun buildOpenAiSchema(policy: ToolPolicy): JSONObject = buildOpenAiSchema()
     fun execute(args: JSONObject): ToolResult
+    fun execute(args: JSONObject, policy: ToolPolicy): ToolResult = execute(args)
 }
 
 data class ToolResult(
     val output: String,
     val isError: Boolean = output.startsWith("Error:"),
+    val imageAttachment: ImageAttachment? = null,
 )
 
 object AgentToolRegistry {
@@ -27,19 +43,24 @@ object AgentToolRegistry {
         SandboxFileTools.WriteTool.name to SandboxFileTools.WriteTool,
         SandboxFileTools.EditTool.name to SandboxFileTools.EditTool,
         SandboxFileTools.BashTool.name to SandboxFileTools.BashTool,
+        ReadImageTool.name to ReadImageTool,
     )
 
-    fun buildToolsSchema(): JSONArray = JSONArray().apply {
+    fun buildToolsSchema(policy: ToolPolicy = ToolPolicy()): JSONArray = JSONArray().apply {
         for (tool in tools.values) {
-            put(tool.buildOpenAiSchema())
+            if (!policy.isAdmin && tool.name == SandboxFileTools.BashTool.name) continue
+            put(tool.buildOpenAiSchema(policy))
         }
     }
 
-    fun execute(name: String, args: JSONObject): ToolResult {
+    fun execute(name: String, args: JSONObject, policy: ToolPolicy = ToolPolicy()): ToolResult {
+        if (!policy.isAdmin && name == SandboxFileTools.BashTool.name) {
+            return ToolResult("Error: Tool 'bash' is disabled in guest sandbox mode.", true)
+        }
         val tool = tools[name]
             ?: return ToolResult("Error: Unknown tool '$name'. Available: ${tools.keys.joinToString(", ")}", true)
         return runCatching {
-            tool.execute(args)
+            tool.execute(args, policy)
         }.onFailure {
             AcidLogger.w(TAG, "tool [$name] threw", it)
         }.getOrElse { err ->

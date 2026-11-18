@@ -34,9 +34,12 @@ object SandboxFileTools {
             required = listOf("file_path"),
         )
 
-        override fun execute(args: JSONObject): ToolResult {
+        override fun execute(args: JSONObject): ToolResult = execute(args, ToolPolicy())
+
+        override fun execute(args: JSONObject, policy: ToolPolicy): ToolResult {
             val pathStr = args.optString("file_path", "")
-            val resolved = AgentConfigStore.resolvePath(pathStr, forWrite = false)
+            val guest = if (policy.isAdmin) null else (policy.currentTalker ?: "guest")
+            val resolved = AgentConfigStore.resolvePath(pathStr, forWrite = false, guestTalker = guest)
             if (resolved is AgentConfigStore.PathResolution.Denied) return ToolResult("Error: ${resolved.reason}", true)
             val f = (resolved as AgentConfigStore.PathResolution.Allowed).file
             if (!f.exists() || !f.isFile) return ToolResult("Error: File not found: ${f.absolutePath}", true)
@@ -74,11 +77,14 @@ object SandboxFileTools {
             required = listOf("file_path", "content"),
         )
 
-        override fun execute(args: JSONObject): ToolResult {
+        override fun execute(args: JSONObject): ToolResult = execute(args, ToolPolicy())
+
+        override fun execute(args: JSONObject, policy: ToolPolicy): ToolResult {
             val pathStr = args.optString("file_path", "")
             if (!args.has("content")) return ToolResult("Error: Missing 'content' argument.", true)
             val content = args.optString("content", "")
-            val resolved = AgentConfigStore.resolvePath(pathStr, forWrite = true)
+            val guest = if (policy.isAdmin) null else (policy.currentTalker ?: "guest")
+            val resolved = AgentConfigStore.resolvePath(pathStr, forWrite = true, guestTalker = guest)
             if (resolved is AgentConfigStore.PathResolution.Denied) return ToolResult("Error: ${resolved.reason}", true)
             val target = resolved as AgentConfigStore.PathResolution.Allowed
             return writeValidated(target.file, target.scope, content, "wrote")
@@ -99,14 +105,17 @@ object SandboxFileTools {
             required = listOf("file_path", "old_string", "new_string"),
         )
 
-        override fun execute(args: JSONObject): ToolResult {
+        override fun execute(args: JSONObject): ToolResult = execute(args, ToolPolicy())
+
+        override fun execute(args: JSONObject, policy: ToolPolicy): ToolResult {
             val pathStr = args.optString("file_path", "")
             val oldStr = args.optString("old_string", "")
             val newStr = args.optString("new_string", "")
             val replaceAll = args.optBoolean("replace_all", false)
             if (oldStr.isEmpty()) return ToolResult("Error: old_string cannot be empty.", true)
 
-            val resolved = AgentConfigStore.resolvePath(pathStr, forWrite = true)
+            val guest = if (policy.isAdmin) null else (policy.currentTalker ?: "guest")
+            val resolved = AgentConfigStore.resolvePath(pathStr, forWrite = true, guestTalker = guest)
             if (resolved is AgentConfigStore.PathResolution.Denied) return ToolResult("Error: ${resolved.reason}", true)
             val target = resolved as AgentConfigStore.PathResolution.Allowed
             val f = target.file

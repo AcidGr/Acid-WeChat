@@ -64,6 +64,24 @@ object AgentConfigStore {
         return File(dir, MODELS_FILE_NAME)
     }
 
+    fun sessionsDir(): File {
+        val dir = File(File(HostContext.getDataDir(), AGENT_DIR_NAME), "sessions")
+        if (!dir.exists()) runCatching { dir.mkdirs() }
+        return dir
+    }
+
+    fun guestSandboxDir(talker: String): File {
+        val safe = sanitizeTalkerKey(talker)
+        val dir = File(File(workspaceDir(), "sandbox"), safe)
+        if (!dir.exists()) runCatching { dir.mkdirs() }
+        return dir
+    }
+
+    fun sanitizeTalkerKey(talker: String): String {
+        val cleaned = talker.trim().replace(Regex("[^a-zA-Z0-9._@-]"), "_")
+        return cleaned.ifEmpty { "default" }.take(80)
+    }
+
     fun ensureInitialized() {
         workspaceDir()
         synchronized(lock) {
@@ -104,9 +122,21 @@ object AgentConfigStore {
         }
     }
 
-    fun resolvePath(rawPath: String, forWrite: Boolean): PathResolution {
+    fun resolvePath(rawPath: String, forWrite: Boolean, guestTalker: String? = null): PathResolution {
         val trimmed = rawPath.trim()
         if (trimmed.isEmpty()) return PathResolution.Denied("Path is empty")
+
+        if (guestTalker != null) {
+            val sandboxRoot = canonical(guestSandboxDir(guestTalker))
+            val candidate = canonical(
+                if (File(trimmed).isAbsolute) File(trimmed) else File(sandboxRoot, trimmed),
+            )
+            return if (isInsideDir(candidate, sandboxRoot)) {
+                PathResolution.Allowed(candidate, PathScope.WORKSPACE)
+            } else {
+                PathResolution.Denied("Guest sandbox denies access outside ${sandboxRoot.absolutePath}")
+            }
+        }
 
         val dataRoot = canonical(HostContext.getDataDir())
         val wsRoot = canonical(workspaceDir())

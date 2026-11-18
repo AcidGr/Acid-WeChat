@@ -170,6 +170,19 @@ object ConfigSchema {
         "后台收到他人语音通知时等待短时转写并直接显示文字",
         dependsOn = AUTO_VOICE_TRANS.key,
     ))
+    val CHAT_AGENT_ENABLED = register(BoolSpec(
+        "chat_agent_enabled", true, FeatureCategory.CHAT, "AI 助手", "聊天 AI 入口与会话代理",
+        "在聊天右上角聊天信息左侧添加 AI 按钮，并维护每个私聊/群聊的独立会话上下文",
+    ))
+    val CHAT_AGENT_PASSIVE_AT = register(BoolSpec(
+        "chat_agent_passive_at", true, FeatureCategory.CHAT, "AI 助手", "收到 @ 自动回复",
+        "群聊被 @我/@ai 或私聊收到 @ai 时自动调用本机 Agent 回复",
+        dependsOn = CHAT_AGENT_ENABLED.key,
+    ))
+    val GLOBAL_AGENT_ENTRY = register(BoolSpec(
+        "global_agent_entry", true, FeatureCategory.CHAT, "AI 助手", "主页全局 AI 入口",
+        "在微信主页面右上角搜索图标左侧添加全局统筹 AI 按钮（保留跨会话发消息工具）",
+    ))
     val ANTI_MOMENTS_DELETE = register(BoolSpec(
         "anti_moments_delete", true, FeatureCategory.MOMENTS, "防删除", "朋友圈防删除",
         "拦截好友删除朋友圈并添加自定义前缀",

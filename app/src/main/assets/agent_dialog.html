@@ -6,13 +6,16 @@
 <title>Acid Agent</title>
 <style>
   :root {
-    --bg: #F6F7F9;
+    --bg: #F3F4F6;
     --surface: #FFFFFF;
     --text: #111827;
     --muted: #6B7280;
-    --line: #ECEEF2;
+    --line: #E5E7EB;
     --accent: #07C160;
     --accent-soft: #EAF9F0;
+    --agent-bg: #E5E7EB;
+    --gold: #D97706;
+    --gold-soft: #FFFBEB;
     --danger: #DC2626;
     --danger-soft: #FEF2F2;
   }
@@ -25,22 +28,31 @@
   .wrap { display: flex; flex-direction: column; height: 100%; }
   .header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--surface);
-    gap: 8px; flex-shrink: 0;
+    padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--surface);
+    gap: 6px; flex-shrink: 0;
   }
-  .title-box { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  .title { font-size: 15px; font-weight: 700; white-space: nowrap; }
+  .title-box { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+  .title {
+    font-size: 14px; font-weight: 700; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; max-width: 120px;
+  }
   .model-pill {
-    font-size: 11px; font-weight: 600; color: #06A853; background: var(--accent-soft);
-    padding: 4px 8px; border-radius: 999px; border: none; cursor: pointer;
-    max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 10.5px; font-weight: 600; color: #06A853; background: var(--accent-soft);
+    padding: 3px 8px; border-radius: 999px; border: none; cursor: pointer;
+    max-width: 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0;
   }
   .model-pill.warn { color: #B45309; background: #FEF3C7; }
-  .hdr-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .hdr-actions { display: flex; gap: 5px; flex-shrink: 0; }
   .hdr-btn {
-    border: none; background: #F2F3F5; color: #374151; font-size: 12px; font-weight: 500;
-    padding: 5px 10px; border-radius: 999px; cursor: pointer;
+    border: none; background: #F2F3F5; color: #374151; font-size: 11.5px; font-weight: 500;
+    padding: 5px 8px; border-radius: 999px; cursor: pointer; white-space: nowrap;
   }
+  .hdr-btn.gold { background: var(--gold-soft); color: #B45309; border: 1px solid #F59E0B; }
+  .toast-bar {
+    display: none; padding: 6px 12px; font-size: 11.5px; background: #FFFBEB;
+    color: #92400E; border-bottom: 1px solid #FDE68A; flex-shrink: 0;
+  }
+  .toast-bar.show { display: block; }
   .cfg-drawer {
     display: none; padding: 10px 14px; background: #FAFAFB; border-bottom: 1px solid var(--line);
     font-size: 12px; flex-shrink: 0;
@@ -60,46 +72,75 @@
     padding: 6px 12px; border-radius: 8px; cursor: pointer; flex-shrink: 0;
   }
   .messages {
-    flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px; background: var(--bg);
+    flex: 1; min-height: 0; overflow-y: auto; padding: 10px 12px; background: var(--bg);
     -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 10px;
   }
   .messages > * { flex-shrink: 0; }
-  .empty {
-    margin: auto 0; text-align: center; padding: 16px 8px; color: var(--muted);
+  .load-more-wrap { display: flex; justify-content: center; padding: 2px 0 4px; }
+  .load-more-btn {
+    border: 1px solid #D1D5DB; background: #FFFFFF; color: #4B5563;
+    font-size: 11px; padding: 5px 12px; border-radius: 999px; cursor: pointer;
   }
-  .empty-title { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 6px; }
-  .empty-sub { font-size: 12px; line-height: 1.5; margin-bottom: 12px; }
-  .chips { display: flex; flex-direction: column; gap: 7px; }
-  .chip {
-    background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
-    padding: 9px 12px; font-size: 12.5px; color: var(--text); text-align: left; cursor: pointer;
+  .empty-state {
+    margin: auto 0; text-align: center; color: var(--muted); font-size: 12.5px; line-height: 1.6;
   }
-  .chip:active { background: #F0FDF4; border-color: var(--accent); }
-  .msg-user {
-    align-self: flex-end; max-width: 85%; background: var(--accent); color: #FFF;
-    padding: 9px 12px; border-radius: 14px 14px 4px 14px; font-size: 13.5px; line-height: 1.45;
-    white-space: pre-wrap; word-break: break-word;
+  .msg-row { display: flex; flex-direction: column; max-width: 86%; gap: 3px; }
+  .msg-row.left { align-self: flex-start; align-items: flex-start; }
+  .msg-row.right { align-self: flex-end; align-items: flex-end; }
+  .bubble-meta {
+    display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--muted);
+    padding: 0 4px;
   }
-  .msg-assistant {
-    align-self: flex-start; max-width: 96%; background: var(--surface); border: 1px solid var(--line);
-    padding: 10px 13px; border-radius: 14px 14px 14px 4px; font-size: 13.5px; line-height: 1.55;
-    word-break: break-word;
+  .gold-badge {
+    font-size: 9.5px; color: #B45309; background: #FEF3C7; border: 1px solid #F59E0B;
+    padding: 0 5px; border-radius: 999px; font-weight: 600;
   }
-  .msg-assistant pre {
+  .bubble {
+    padding: 9px 12px; font-size: 13.5px; line-height: 1.5; word-break: break-word;
+  }
+  .bubble-peer {
+    background: #FFFFFF; color: var(--text); border: 1px solid var(--line);
+    border-radius: 4px 14px 14px 14px; white-space: pre-wrap;
+  }
+  .bubble-agent {
+    background: var(--agent-bg); color: #1F2937; border: 1px solid #D1D5DB;
+    border-radius: 4px 14px 14px 14px;
+  }
+  .bubble-master {
+    background: var(--accent); color: #FFFFFF; border: 1px solid #06AE56;
+    border-radius: 14px 4px 14px 14px; white-space: pre-wrap;
+  }
+  .bubble.compacted {
+    border: 1.5px solid var(--gold) !important;
+    box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.22);
+  }
+  .bubble-agent pre {
     background: #111827; color: #F9FAFB; padding: 8px 10px; border-radius: 8px;
     overflow-x: auto; font-size: 11.5px; line-height: 1.45; margin: 6px 0;
   }
-  .msg-assistant code {
-    background: #F3F4F6; padding: 1px 4px; border-radius: 4px; font-size: 12px;
+  .bubble-agent code {
+    background: rgba(255,255,255,0.65); padding: 1px 4px; border-radius: 4px; font-size: 12px;
   }
-  .msg-assistant pre code { background: transparent; padding: 0; color: inherit; }
-  .msg-assistant p { margin: 4px 0; }
-  .msg-assistant ul { margin: 4px 0; padding-left: 18px; }
+  .bubble-agent pre code { background: transparent; padding: 0; color: inherit; }
+  .mini-send-btn {
+    border: none; background: transparent; color: #059669; font-size: 11px;
+    padding: 2px 4px; cursor: pointer; font-weight: 500;
+  }
   .msg-think, .msg-tool {
     background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
-    font-size: 12px; overflow: hidden;
+    font-size: 12px; overflow: hidden; align-self: stretch;
   }
   .msg-tool.err { border-color: #FECACA; background: var(--danger-soft); }
+  .msg-memory {
+    background: var(--gold-soft); border: 1.5px solid var(--gold); border-radius: 10px;
+    font-size: 12px; overflow: hidden; align-self: stretch;
+    box-shadow: 0 1px 4px rgba(217, 119, 6, 0.14);
+  }
+  .msg-memory .card-head { color: #92400E; }
+  .msg-memory .card-body {
+    background: #FFFDF5; color: #78350F; border-top-color: #FDE68A;
+    font-family: inherit; white-space: pre-wrap; word-break: break-word;
+  }
   .card-head {
     display: flex; align-items: center; justify-content: space-between;
     padding: 7px 10px; cursor: pointer; font-weight: 600; color: #374151; gap: 6px;
@@ -109,6 +150,7 @@
   .dot {
     width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0;
   }
+  .dot.gold { background: var(--gold); }
   .dot.spin { animation: pulse 1s infinite; }
   .dot.err { background: var(--danger); }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
@@ -117,7 +159,7 @@
     font-family: ui-monospace, monospace; font-size: 11px; color: #4B5563;
     white-space: pre-wrap; word-break: break-all; max-height: 180px; overflow-y: auto;
   }
-  .msg-think.open .card-body, .msg-tool.open .card-body { display: block; }
+  .msg-think.open .card-body, .msg-tool.open .card-body, .msg-memory.open .card-body { display: block; }
   .msg-error {
     background: var(--danger-soft); border: 1px solid #FECACA; color: #991B1B;
     border-radius: 10px; padding: 9px 11px; font-size: 12.5px; white-space: pre-wrap; word-break: break-word;
@@ -138,23 +180,54 @@
   }
   .send-btn.stop { background: var(--danger); }
   .status-bar {
-    padding: 3px 14px 6px; font-size: 10.5px; color: var(--muted); background: var(--surface);
+    padding: 3px 12px 6px; font-size: 10.5px; color: var(--muted); background: var(--surface);
     display: flex; justify-content: space-between; flex-shrink: 0;
   }
+  .img-chip {
+    display: inline-block; font-size: 12px; padding: 2px 7px; border-radius: 6px;
+    background: rgba(0, 0, 0, 0.06); font-weight: 500; max-width: 100%;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle;
+  }
+  .bubble-master .img-chip { background: rgba(255, 255, 255, 0.22); }
+  .confirm-mask {
+    display: none; position: fixed; inset: 0; background: rgba(17, 24, 39, 0.42);
+    z-index: 999; align-items: center; justify-content: center; padding: 20px;
+  }
+  .confirm-mask.open { display: flex; }
+  .confirm-card {
+    width: 100%; max-width: 320px; background: var(--surface); border-radius: 14px;
+    padding: 16px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22); border: 1px solid var(--line);
+  }
+  .confirm-title { font-size: 15px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
+  .confirm-desc { font-size: 12.5px; color: var(--muted); line-height: 1.55; margin-bottom: 14px; }
+  .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+  .confirm-cancel {
+    border: 1px solid var(--line); background: #F9FAFB; color: #374151;
+    font-size: 12.5px; font-weight: 500; padding: 7px 14px; border-radius: 9px; cursor: pointer;
+  }
+  .confirm-ok {
+    border: none; color: #FFF; font-size: 12.5px; font-weight: 600;
+    padding: 7px 14px; border-radius: 9px; cursor: pointer;
+  }
+  .confirm-ok.gold { background: var(--gold); }
+  .confirm-ok.danger { background: var(--danger); }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="header">
     <div class="title-box">
-      <span class="title">Acid Agent</span>
+      <span class="title" id="chatTitle">Acid Agent</span>
       <button class="model-pill" id="modelPill" onclick="toggleCfg()">加载中</button>
     </div>
     <div class="hdr-actions">
-      <button class="hdr-btn" onclick="clearChat()">重置</button>
+      <button class="hdr-btn gold" id="compactBtn" onclick="onCompactClick()">压缩</button>
+      <button class="hdr-btn" id="clearBtn" onclick="onClearClick()">清空</button>
       <button class="hdr-btn" onclick="closeDialog()">关闭</button>
     </div>
   </div>
+
+  <div class="toast-bar" id="toastBar"></div>
 
   <div class="cfg-drawer" id="cfgDrawer">
     <div class="cfg-row">
@@ -178,19 +251,39 @@
   <div class="messages" id="messages"></div>
 
   <div class="composer">
-    <textarea id="input" rows="1" oninput="autoGrow(this)"></textarea>
+    <textarea id="input" rows="1" placeholder="向我提问？" oninput="autoGrow(this)"></textarea>
     <button class="send-btn" id="sendBtn" onclick="onActionClick()">发送</button>
   </div>
   <div class="status-bar">
-    <span id="statusText">就绪 · 单次会话</span>
+    <span id="statusText">就绪</span>
     <span id="tokenText"></span>
   </div>
 </div>
 
+<div class="confirm-mask" id="confirmMask" onclick="onConfirmMaskClick(event)">
+  <div class="confirm-card">
+    <div class="confirm-title" id="confirmTitle">确认操作</div>
+    <div class="confirm-desc" id="confirmDesc"></div>
+    <div class="confirm-actions">
+      <button class="confirm-cancel" onclick="closeConfirm()">取消</button>
+      <button class="confirm-ok" id="confirmOkBtn" onclick="runConfirmedAction()">确认</button>
+    </div>
+  </div>
+</div>
+
 <script>
+  let chatTitle = "Acid Agent";
+  let isGlobal = false;
   let running = false;
+  let compacting = false;
   let step = 0;
   let totalTokens = 0;
+  let compactCount = 0;
+  let loadedStartIndex = 0;
+  let totalCount = 0;
+  let hasMore = false;
+  let loadingOlder = false;
+  let pendingConfirmAction = null;
   let items = [];
   let cfg = {};
   const openCards = {};
@@ -198,16 +291,37 @@
   function init() {
     try {
       const s = JSON.parse(window.AcidAgentBridge.getInitialState());
+      chatTitle = s.title || "Acid Agent";
+      isGlobal = !!s.isGlobal;
       running = !!s.running;
       step = s.step || 0;
       totalTokens = s.totalTokens || 0;
+      compactCount = s.compactCount || 0;
+      loadedStartIndex = s.startIndex || 0;
+      totalCount = s.totalCount || 0;
+      hasMore = !!s.hasMore;
       items = s.items || [];
       cfg = s.config || {};
+      document.getElementById("chatTitle").textContent = chatTitle;
       fillCfg();
-      render();
+      render(false);
     } catch (e) {
       document.getElementById("messages").innerHTML = '<div class="msg-error">初始化失败</div>';
     }
+
+    const box = document.getElementById("messages");
+    box.addEventListener("scroll", function() {
+      if (box.scrollTop <= 28 && hasMore && !loadingOlder) {
+        loadOlder();
+      }
+    });
+  }
+
+  function showToast(msg, durationMs) {
+    const bar = document.getElementById("toastBar");
+    bar.textContent = msg;
+    bar.classList.add("show");
+    setTimeout(() => bar.classList.remove("show"), durationMs || 2800);
   }
 
   function fillCfg() {
@@ -263,13 +377,100 @@
     window.AcidAgentBridge.sendPrompt(txt);
   }
 
-  function sendQuick(txt) {
-    if (running) return;
-    window.AcidAgentBridge.sendPrompt(txt);
+  function openConfirm(title, desc, okText, btnStyle, actionFn) {
+    pendingConfirmAction = actionFn;
+    document.getElementById("confirmTitle").textContent = title;
+    document.getElementById("confirmDesc").textContent = desc;
+    const okBtn = document.getElementById("confirmOkBtn");
+    okBtn.textContent = okText;
+    okBtn.className = "confirm-ok " + btnStyle;
+    document.getElementById("confirmMask").classList.add("open");
   }
 
-  function clearChat() {
-    window.AcidAgentBridge.clearChat();
+  function closeConfirm() {
+    pendingConfirmAction = null;
+    document.getElementById("confirmMask").classList.remove("open");
+  }
+
+  function onConfirmMaskClick(ev) {
+    if (ev.target && ev.target.id === "confirmMask") closeConfirm();
+  }
+
+  function runConfirmedAction() {
+    const fn = pendingConfirmAction;
+    closeConfirm();
+    if (fn) fn();
+  }
+
+  function onCompactClick() {
+    if (running || compacting) return;
+    openConfirm(
+      "压缩当前会话？",
+      "保留最近 10 条原文记录，把更早对话浓缩成金色边框的长期记忆快照（会调用一次模型）。",
+      "确认压缩",
+      "gold",
+      function() {
+        compacting = true;
+        document.getElementById("compactBtn").textContent = "压缩中";
+        window.AcidAgentBridge.compactSession();
+      }
+    );
+  }
+
+  window.onCompactResult = function(res) {
+    compacting = false;
+    document.getElementById("compactBtn").textContent = "压缩";
+    if (res && res.message) showToast(res.message, 3200);
+  };
+
+  function onClearClick() {
+    openConfirm(
+      "确认清空当前会话？",
+      "将删除当前聊天的上下文与长期记忆快照，不影响微信本地历史消息和模型配置。",
+      "确认清空",
+      "danger",
+      function() {
+        window.AcidAgentBridge.clearChat();
+        showToast("当前会话上下文已清空", 2000);
+      }
+    );
+  }
+
+  function loadOlder() {
+    if (!hasMore || loadingOlder) return;
+    loadingOlder = true;
+    try {
+      const box = document.getElementById("messages");
+      const prevScrollHeight = box.scrollHeight;
+      const prevScrollTop = box.scrollTop;
+      const res = JSON.parse(window.AcidAgentBridge.loadOlderItems(loadedStartIndex));
+      const older = res.items || [];
+      loadedStartIndex = res.startIndex || 0;
+      totalCount = res.totalCount || totalCount;
+      hasMore = !!res.hasMore;
+      if (older.length > 0) {
+        items = older.concat(items);
+        renderMessages("prepend", prevScrollHeight, prevScrollTop);
+      } else {
+        renderMessages("preserve");
+      }
+    } finally {
+      loadingOlder = false;
+    }
+  }
+
+  function sendBubbleToWeChat(btn, idx) {
+    const it = items[idx];
+    if (!it || !it.text) return;
+    try {
+      const res = JSON.parse(window.AcidAgentBridge.sendToWeChat(it.text));
+      if (res.ok) {
+        btn.textContent = "已发送 ✓";
+        btn.disabled = true;
+      } else {
+        showToast("发送失败: " + (res.detail || "未知错误"), 3000);
+      }
+    } catch (_) {}
   }
 
   function closeDialog() {
@@ -280,50 +481,117 @@
     running = !!st.running;
     step = st.step || 0;
     totalTokens = st.totalTokens || 0;
+    compactCount = st.compactCount || 0;
     renderHeaderFooter();
   };
 
-  window.onAgentItems = function(nextItems) {
-    items = nextItems || [];
-    renderMessages();
+  window.onAgentWindow = function(win) {
+    const box = document.getElementById("messages");
+    const nearBottom = (box.scrollHeight - box.scrollTop - box.clientHeight) < 90;
+    items = win.items || [];
+    loadedStartIndex = win.startIndex || 0;
+    totalCount = win.totalCount || items.length;
+    hasMore = !!win.hasMore;
+    compactCount = win.compactCount || 0;
+    renderHeaderFooter();
+    renderMessages(nearBottom ? "bottom" : "preserve");
   };
 
-  function render() {
+  function render(preserveScroll) {
     renderHeaderFooter();
-    renderMessages();
+    renderMessages(preserveScroll ? "preserve" : "bottom");
   }
 
   function renderHeaderFooter() {
     const btn = document.getElementById("sendBtn");
     btn.textContent = running ? "停止" : "发送";
     btn.classList.toggle("stop", running);
-    document.getElementById("statusText").textContent = running ? `思考执行中 · 第 ${step} 步` : "就绪 · 单次会话";
+    const baseSt = running ? `思考执行中 · 第 ${step} 步` : `就绪 · 共 ${totalCount} 条（当前加载 ${items.length} 条）`;
+    document.getElementById("statusText").textContent = compactCount > 0 ? `${baseSt} · 已压缩 ${compactCount} 次` : baseSt;
     document.getElementById("tokenText").textContent = totalTokens > 0 ? `${totalTokens} tokens` : "";
   }
 
   function toggleCard(id) {
     openCards[id] = !openCards[id];
-    renderMessages(true);
+    renderMessages("preserve");
   }
 
-  function renderMessages(preserveScroll) {
+  function renderMessages(scrollMode, prevScrollHeight, prevScrollTop) {
     const box = document.getElementById("messages");
-    const prevScrollTop = box.scrollTop;
-    if (!items.length) {
-      box.innerHTML = "";
+    const curTop = box.scrollTop;
+
+    if (!items.length && !hasMore) {
+      box.innerHTML = isGlobal
+        ? `<div class="empty-state">全局统筹会话（不绑定单个私聊/群聊）<br/>可跨会话检索联系人、读取记录或按指令代发消息</div>`
+        : `<div class="empty-state">当前会话暂无消息<br/>在下方直接以 master 身份对话，或在微信内通过 @ 触发自动回复</div>`;
       return;
     }
 
-    const html = items.map(it => {
-      if (it.type === "user") {
-        return `<div class="msg-user">${esc(it.text)}</div>`;
+    const parts = [];
+    if (hasMore) {
+      parts.push(`<div class="load-more-wrap"><button class="load-more-btn" onclick="loadOlder()">↑ 上滑或点击加载更早 20 条（上方还有 ${loadedStartIndex} 条）</button></div>`);
+    }
+
+    items.forEach((it, idx) => {
+      const compCls = it.compacted ? "compacted" : "";
+      const goldTag = it.compacted ? `<span class="gold-badge">已压缩</span>` : "";
+      const tm = esc(it.timeText || "");
+
+      if (it.kind === "master") {
+        parts.push(`
+          <div class="msg-row right">
+            <div class="bubble-meta">${goldTag}<span>master · ${tm}</span></div>
+            <div class="bubble bubble-master ${compCls}">${formatChatBubbleText(it.text)}</div>
+          </div>
+        `);
+        return;
       }
-      if (it.type === "error") {
-        return `<div class="msg-error">${esc(it.text)}</div>`;
+      if (it.kind === "peer") {
+        const who = esc(it.senderName || "对方");
+        parts.push(`
+          <div class="msg-row left">
+            <div class="bubble-meta"><span>${who} · ${tm}</span>${goldTag}</div>
+            <div class="bubble bubble-peer ${compCls}">${formatChatBubbleText(it.text)}</div>
+          </div>
+        `);
+        return;
       }
-      if (it.type === "thinking") {
+      if (it.kind === "agent") {
+        const sendBtnHtml = (!isGlobal && !it.running && it.text && it.text.trim())
+          ? `<button class="mini-send-btn" onclick="sendBubbleToWeChat(this, ${idx})">发到当前聊天</button>`
+          : "";
+        parts.push(`
+          <div class="msg-row left">
+            <div class="bubble-meta"><span>AI · ${tm}</span>${goldTag}</div>
+            <div class="bubble bubble-agent ${compCls}">${renderMarkdown(it.text)}</div>
+            ${sendBtnHtml}
+          </div>
+        `);
+        return;
+      }
+      if (it.kind === "memory") {
         const opened = openCards[it.id] ? "open" : "";
-        return `
+        parts.push(`
+          <div class="msg-memory ${opened}">
+            <div class="card-head" onclick="toggleCard('${escAttr(it.id)}')">
+              <div class="card-left">
+                <span class="dot gold"></span>
+                <span class="card-title">${esc(it.senderName || "长期记忆快照")}</span>
+              </div>
+              <span>${opened ? "收起" : "查看快照"}</span>
+            </div>
+            <div class="card-body">${esc(it.text)}</div>
+          </div>
+        `);
+        return;
+      }
+      if (it.kind === "error") {
+        parts.push(`<div class="msg-error">${esc(it.text)}</div>`);
+        return;
+      }
+      if (it.kind === "thinking") {
+        const opened = openCards[it.id] ? "open" : "";
+        parts.push(`
           <div class="msg-think ${opened}">
             <div class="card-head" onclick="toggleCard('${escAttr(it.id)}')">
               <div class="card-left">
@@ -334,12 +602,13 @@
             </div>
             <div class="card-body">${esc(it.text)}</div>
           </div>
-        `;
+        `);
+        return;
       }
-      if (it.type === "tool") {
+      if (it.kind === "tool") {
         const opened = openCards[it.id] ? "open" : "";
         const errCls = it.isError ? "err" : "";
-        return `
+        parts.push(`
           <div class="msg-tool ${opened} ${errCls}">
             <div class="card-head" onclick="toggleCard('${escAttr(it.id)}')">
               <div class="card-left">
@@ -350,13 +619,26 @@
             </div>
             <div class="card-body">Args:\n${esc(it.toolArgs)}\n\nResult:\n${esc(it.toolResult)}</div>
           </div>
-        `;
+        `);
       }
-      return `<div class="msg-assistant">${renderMarkdown(it.text)}</div>`;
-    }).join("");
+    });
 
-    box.innerHTML = html;
-    box.scrollTop = preserveScroll ? prevScrollTop : box.scrollHeight;
+    box.innerHTML = parts.join("");
+    if (scrollMode === "prepend" && typeof prevScrollHeight === "number") {
+      box.scrollTop = prevScrollTop + (box.scrollHeight - prevScrollHeight);
+    } else if (scrollMode === "preserve") {
+      box.scrollTop = curTop;
+    } else {
+      box.scrollTop = box.scrollHeight;
+    }
+  }
+
+  function formatChatBubbleText(raw) {
+    return esc(raw || "").replace(/\[图片:\s*([^\]]+)\]/g, function(_, p) {
+      const clean = p.trim();
+      const base = clean.split("/").pop() || clean;
+      return `<span class="img-chip" title="${esc(clean)}">[图片 · ${esc(base)}]</span>`;
+    });
   }
 
   function renderMarkdown(md) {

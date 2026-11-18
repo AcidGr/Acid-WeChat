@@ -37,34 +37,65 @@ object WeChatAgentTool : AgentTool {
         "config_patch",
     )
 
-    override fun buildOpenAiSchema(): JSONObject {
+    override fun buildOpenAiSchema(): JSONObject = buildOpenAiSchema(ToolPolicy())
+
+    override fun buildOpenAiSchema(policy: ToolPolicy): JSONObject {
+        val allowedActions = when {
+            !policy.isAdmin -> listOf("read_messages")
+            !policy.allowSendMessage -> actions.filter { it != "send_message" }
+            else -> actions
+        }
+        val desc = when {
+            !policy.isAdmin -> "Read history messages from the CURRENT chat conversation only (`action='read_messages'`)."
+            !policy.allowSendMessage -> "Inspect status, search contacts/chats, read chat messages, apply fake likes/comments (with explicit sns_id), or patch config.json. (`send_message` is disabled in per-chat sessions.)"
+            else -> "Interact with hooked WeChat: inspect status, search contacts/chats, read chat messages, send real WeChat text messages, apply fake likes/comments (with explicit sns_id), or patch config.json."
+        }
         val props = JSONObject().apply {
-            put("action", propEnum("string", "WeChat action to execute.", actions))
-            put("query", prop("string", "Search query for 'search_contacts'."))
-            put("talker", prop("string", "Target contact/group username (`wxid_...`, `...@chatroom`, `filehelper`) or remark/nickname for 'read_messages'/'send_message'."))
-            put("text", prop("string", "Message text content for 'send_message' or comment text for 'moment_fake_comment'."))
+            put("action", propEnum("string", "WeChat action to execute.", allowedActions))
+            if (policy.isAdmin) {
+                put("query", prop("string", "Search query for 'search_contacts'."))
+                put("talker", prop("string", "Target contact/group username (`wxid_...`, `...@chatroom`, `filehelper`) or remark/nickname."))
+                if (policy.allowSendMessage) {
+                    put("text", prop("string", "Message text content for 'send_message' or comment text for 'moment_fake_comment'."))
+                } else {
+                    put("text", prop("string", "Comment text for 'moment_fake_comment'."))
+                }
+                put("include_chatrooms", prop("boolean", "Include @chatroom groups in 'search_contacts' (default true)."))
+                put("sns_id", prop("string", "64-bit Moments snsId string for 'moment_fake_like'/'moment_fake_comment'."))
+                put("usernames", propStringArray("Friend usernames for 'moment_fake_like'."))
+                put("count", prop("integer", "Random friend count for 'moment_fake_like' when 'usernames' is omitted."))
+                put("username", prop("string", "Single friend username or name for 'moment_fake_comment'."))
+                put("clear", prop("boolean", "When true, clear fake likes/comments instead of adding."))
+                put("patch", prop("object", "Key-value JSON object to merge into config.json for 'config_patch'."))
+            }
             put("keyword", prop("string", "Optional keyword filter for 'read_messages'."))
-            put("include_chatrooms", prop("boolean", "Include @chatroom groups in 'search_contacts' (default true)."))
             put("limit", prop("integer", "Max items to return (default 25)."))
             put("offset", prop("integer", "Pagination offset (default 0)."))
-            put("sns_id", prop("string", "64-bit Moments snsId string for 'moment_fake_like'/'moment_fake_comment'."))
-            put("usernames", propStringArray("Friend usernames for 'moment_fake_like'."))
-            put("count", prop("integer", "Random friend count for 'moment_fake_like' when 'usernames' is omitted."))
-            put("username", prop("string", "Single friend username or name for 'moment_fake_comment'."))
-            put("clear", prop("boolean", "When true, clear fake likes/comments instead of adding."))
-            put("patch", prop("object", "Key-value JSON object to merge into config.json for 'config_patch'."))
         }
         return makeTool(
             name = name,
-            description = "Interact with hooked WeChat: inspect status, search contacts/chats, read chat messages, " +
-                "send real WeChat text messages, apply fake likes/comments (with explicit sns_id), or patch config.json.",
+            description = desc,
             properties = props,
             required = listOf("action"),
         )
     }
 
-    override fun execute(args: JSONObject): ToolResult {
+    override fun execute(args: JSONObject): ToolResult = execute(args, ToolPolicy())
+
+    override fun execute(args: JSONObject, policy: ToolPolicy): ToolResult {
         val action = args.optString("action", "").trim()
+        if (!policy.isAdmin) {
+            if (action != "read_messages") {
+                return ToolResult("Error: Action '$action' is denied in guest mode (only current-chat 'read_messages' is permitted).", true)
+            }
+            val currentTalker = policy.currentTalker?.takeIf { it.isNotBlank() }
+                ?: return ToolResult("Error: Missing current conversation scope in guest mode.", true)
+            val scopedArgs = JSONObject(args.toString()).put("talker", currentTalker)
+            return handleReadMessages(scopedArgs)
+        }
+        if (action == "send_message" && !policy.allowSendMessage) {
+            return ToolResult("Error: 'send_message' is disabled inside per-chat Agent sessions; output the reply text directly or use the Global Agent.", true)
+        }
         return when (action) {
             "status" -> ToolResult(buildStatus().toString(2))
             "search_contacts" -> handleSearchContacts(args)

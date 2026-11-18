@@ -83,10 +83,17 @@ object ChatRepository {
     }.getOrNull()
 
     fun queryVoiceTranscript(msgId: Long, fileName: String): String? = runCatching {
-        val cursor = WcdbBridge.rawQuery(
-            "SELECT content FROM VoiceTransText WHERE cmsgId = ? OR msgId = ? LIMIT 1",
-            arrayOf(fileName, msgId.toString()),
-        ) ?: return@runCatching null
+        val cursor = if (fileName.isNotBlank()) {
+            WcdbBridge.rawQuery(
+                "SELECT content FROM VoiceTransText WHERE cmsgId = ? OR msgId = ? LIMIT 1",
+                arrayOf(fileName, msgId.toString()),
+            )
+        } else {
+            WcdbBridge.rawQuery(
+                "SELECT content FROM VoiceTransText WHERE msgId = ? LIMIT 1",
+                arrayOf(msgId.toString()),
+            )
+        } ?: return@runCatching null
         cursor.use { c ->
             if (c.moveToFirst()) c.getString(0)?.takeIf { it.isNotBlank() } else null
         }
@@ -252,13 +259,38 @@ object ChatRepository {
         return sb.toString()
     }
 
-    private fun extractGroupSenderWxid(content: String?): String? {
+    fun extractGroupSenderWxid(content: String?): String? {
         if (content.isNullOrEmpty()) return null
         val idx = content.indexOf(":\n")
         if (idx !in 1..64) return null
         val prefix = content.substring(0, idx).trim()
         if (prefix.isEmpty() || prefix.any { it.isWhitespace() }) return null
         return prefix
+    }
+
+    @Volatile
+    private var cachedSelfWxid: String? = null
+
+    fun querySelfWxid(): String? {
+        cachedSelfWxid?.let { return it }
+        val resolved = runCatching {
+            val cursor = WcdbBridge.rawQuery(
+                "SELECT value FROM userinfo WHERE id = 2 LIMIT 1",
+                emptyArray(),
+            ) ?: return@runCatching null
+            cursor.use { c ->
+                if (c.moveToFirst()) c.getString(0)?.trim()?.takeIf { it.isNotEmpty() } else null
+            }
+        }.getOrNull()
+        if (!resolved.isNullOrEmpty()) cachedSelfWxid = resolved
+        return resolved
+    }
+
+    fun resolveChatTitle(talker: String): String {
+        if (talker == "filehelper") return "文件传输助手"
+        val names = queryContactNames(talker)
+        return firstNonBlank(names?.first, names?.second, names?.third)
+            ?: if (talker.endsWith("@chatroom")) "群聊" else talker
     }
 
     private fun firstNonBlank(vararg candidates: String?): String? =

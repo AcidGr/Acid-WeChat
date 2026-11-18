@@ -3,11 +3,13 @@ package com.acid.wechat.core
 import android.content.ContentValues
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
+import java.lang.reflect.Method
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.random.Random
 
 /**
  * Helper to insert local grey system messages (type = 10000) into WeChat's MsgInfoStorage
- * so intercepted recalls show a clean inline notice without touching the preserved original message.
+ * and notify registered observers when new WeChat messages are inserted.
  */
 object MsgNoticeHelper {
     private const val TAG = "MsgNoticeHelper"
@@ -19,10 +21,19 @@ object MsgNoticeHelper {
     @Volatile
     private var capturedMsgInfoStorage: Any? = null
 
+    @Volatile
+    private var convertToMethod: Method? = null
+
+    private val insertObservers = CopyOnWriteArrayList<(Any, Long, ContentValues) -> Unit>()
+
     fun getCapturedStorage(): Any? = capturedMsgInfoStorage
 
     fun resolveMsgInfoClass(): Class<*>? =
         if (::ruleMsgInfo.isInitialized) ruleMsgInfo.resolveClass() else null
+
+    fun addInsertObserver(observer: (msgObj: Any, insertedMsgId: Long, values: ContentValues) -> Unit) {
+        insertObservers.add(observer)
+    }
 
     fun registerDexRules() {
         ruleMsgInfo = DexKitLocator.registerClass(
@@ -48,6 +59,10 @@ object MsgNoticeHelper {
 
     fun init() {
         val insertMethod = ruleMsgInfoStorageInsert.resolveMethod() ?: return
+        val msgInfoCls = ruleMsgInfo.resolveClass()
+        if (msgInfoCls != null) {
+            convertToMethod = ReflectHelper.findMethod(msgInfoCls, "convertTo", emptyList())
+        }
         runCatching {
             XposedBridge.hookMethod(insertMethod, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
@@ -55,8 +70,22 @@ object MsgNoticeHelper {
                         capturedMsgInfoStorage = param.thisObject
                     }
                 }
+
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (insertObservers.isEmpty()) return
+                    val msgObj = param.args?.firstOrNull() ?: return
+                    val insertedId = (param.result as? Long) ?: 0L
+                    if (insertedId <= 0L) return
+                    val conv = convertToMethod ?: return
+                    runCatching {
+                        val values = conv.invoke(msgObj) as? ContentValues ?: return
+                        for (obs in insertObservers) {
+                            runCatching { obs(msgObj, insertedId, values) }
+                        }
+                    }
+                }
             })
-            AcidLogger.i(TAG, "hooked MsgInfoStorage.insert for instance capture")
+            AcidLogger.i(TAG, "hooked MsgInfoStorage.insert for capture & message observation")
         }.onFailure {
             AcidLogger.w(TAG, "failed hooking MsgInfoStorage.insert", it)
         }

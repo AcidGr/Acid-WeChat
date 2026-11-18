@@ -13,11 +13,13 @@ import com.acid.wechat.debug.DebugServer
 import com.acid.wechat.features.AntiMomentsPostFeature
 import com.acid.wechat.features.AntiRecallFeature
 import com.acid.wechat.features.AutoVoiceTransFeature
+import com.acid.wechat.features.ChatAgentFeature
 import com.acid.wechat.features.CustomGameEmojiFeature
 import com.acid.wechat.features.FakeSnsCommentFeature
 import com.acid.wechat.features.FakeSnsLikeFeature
 import com.acid.wechat.features.SavePathFeature
 import com.acid.wechat.features.SnsTailFeature
+import com.acid.wechat.ui.HomeHeaderAiHook
 import com.acid.wechat.ui.SettingsHook
 import com.acid.wechat.wechat.WeChatSender
 import de.robv.android.xposed.IXposedHookLoadPackage
@@ -99,6 +101,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             // Initialize version-agnostic bridges & Settings UI first
             WcdbBridge.init()
             SettingsHook.init()
+            HomeHeaderAiHook.init()
             DebugServer.startIfEnabled()
 
             // Register features & DexKit rules
@@ -107,6 +110,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             FeatureRegistry.register(AntiRecallFeature)
             FeatureRegistry.register(CustomGameEmojiFeature)
             FeatureRegistry.register(AutoVoiceTransFeature)
+            FeatureRegistry.register(ChatAgentFeature)
             FeatureRegistry.register(AntiMomentsPostFeature)
             FeatureRegistry.register(FakeSnsLikeFeature)
             FeatureRegistry.register(FakeSnsCommentFeature)

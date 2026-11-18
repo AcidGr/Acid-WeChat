@@ -1,337 +1,187 @@
 package com.acid.wechat.agent
 
+import com.acid.wechat.agent.AgentContextBuilder.InvocationMode
+import com.acid.wechat.agent.AgentSessionModels.TimelineItem
+import com.acid.wechat.agent.AgentSessionModels.formatBubbleTime
+import com.acid.wechat.agent.AgentSessionStore.ChatSessionState
 import com.acid.wechat.core.AcidLogger
-import com.acid.wechat.core.ConfigSchema
-import com.acid.wechat.core.ConfigStore
-import org.json.JSONArray
-import org.json.JSONObject
+import com.acid.wechat.wechat.WeChatSender
 import java.net.HttpURLConnection
-import java.util.Collections
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Ephemeral single-session Agent ReAct loop living inside Acid-WeChat.
+ * Public coordinator for per-chat Agent sessions (`talker`), worker threads, and listeners.
  */
 object AcidAgentLoop {
     private const val TAG = "AcidAgentLoop"
 
-    data class UiItem(
-        val id: String,
-        val type: String,
-        var text: String = "",
-        var toolName: String = "",
-        var toolSummary: String = "",
-        var toolArgs: String = "",
-        var toolResult: String = "",
-        var running: Boolean = false,
-        var isError: Boolean = false,
-    ) {
-        fun toJson(): JSONObject = JSONObject().apply {
-            put("id", id)
-            put("type", type)
-            put("text", text)
-            put("toolName", toolName)
-            put("toolSummary", toolSummary)
-            put("toolArgs", toolArgs)
-            put("toolResult", toolResult)
-            put("running", running)
-            put("isError", isError)
-        }
-    }
-
     interface Listener {
-        fun onStateChanged(running: Boolean, step: Int, totalTokens: Int)
-        fun onItemsChanged(items: List<UiItem>)
+        fun onStateChanged(talker: String, running: Boolean, step: Int, totalTokens: Int, compactCount: Int)
+        fun onTimelineChanged(talker: String)
     }
 
-    private val uiItems = Collections.synchronizedList(mutableListOf<UiItem>())
-    private val apiMessages = Collections.synchronizedList(mutableListOf<JSONObject>())
-    private val listeners = CopyOnWriteArrayList<Listener>()
-    private val runGen = AtomicInteger(0)
-    private val idSeq = AtomicInteger(0)
+    internal class RunState {
+        val runGen = AtomicInteger(0)
+        @Volatile var isRunning = false
+        @Volatile var currentStep = 0
+        @Volatile var stopRequested = false
+        @Volatile var activeConn: HttpURLConnection? = null
+    }
 
-    @Volatile var isRunning = false
-        private set
-    @Volatile var currentStep = 0
-        private set
-    @Volatile var lastTotalTokens = 0
-        private set
-    @Volatile private var stopRequested = false
-    @Volatile private var activeConn: HttpURLConnection? = null
-    @Volatile private var workerThread: Thread? = null
+    private val runStates = ConcurrentHashMap<String, RunState>()
+    private val listeners = CopyOnWriteArrayList<Listener>()
 
     fun addListener(l: Listener) { listeners.add(l) }
     fun removeListener(l: Listener) { listeners.remove(l) }
 
-    fun snapshotUiItems(): List<UiItem> = synchronized(uiItems) { uiItems.map { it.copy() } }
-
-    fun clearSession() {
-        stop()
-        synchronized(uiItems) { uiItems.clear() }
-        synchronized(apiMessages) { apiMessages.clear() }
-        currentStep = 0
-        lastTotalTokens = 0
-        notifyItems()
-        notifyState()
+    fun stateSnapshot(talker: String): Triple<Boolean, Int, Int> {
+        val rs = runStates[talker]
+        val session = AgentSessionStore.getOrLoad(talker)
+        return Triple(rs?.isRunning ?: false, rs?.currentStep ?: 0, session.lastTotalTokens)
     }
 
-    fun stop() {
-        stopRequested = true
-        runGen.incrementAndGet()
-        runCatching { activeConn?.disconnect() }
-        activeConn = null
-        isRunning = false
-        synchronized(uiItems) {
-            for (it in uiItems) {
+    fun isRunning(talker: String): Boolean = runStates[talker]?.isRunning == true
+
+    fun stop(talker: String) {
+        val rs = runStates.getOrPut(talker) { RunState() }
+        rs.stopRequested = true
+        rs.runGen.incrementAndGet()
+        runCatching { rs.activeConn?.disconnect() }
+        rs.activeConn = null
+        rs.isRunning = false
+        val session = AgentSessionStore.getOrLoad(talker)
+        synchronized(session) {
+            for (it in session.timeline) {
                 if (it.running) {
                     it.running = false
-                    if (it.type == "tool" && it.toolResult == "执行中...") {
-                        it.toolResult = "[已停止]"
-                    }
+                    if (it.kind == "tool" && it.toolResult == "执行中...") it.toolResult = "[已停止]"
                 }
             }
         }
-        notifyItems()
-        notifyState()
+        AgentSessionStore.persist(session)
+        notifyTimeline(talker)
+        notifyState(talker)
     }
 
-    fun submitPrompt(prompt: String) {
+    fun clearSession(talker: String) {
+        stop(talker)
+        AgentSessionStore.clearSession(talker)
+        notifyTimeline(talker)
+        notifyState(talker)
+    }
+
+    fun notifyExternalTimelineUpdate(talker: String) = notifyTimeline(talker)
+
+    fun submitPanelPrompt(talker: String, titleHint: String?, prompt: String) {
         val text = prompt.trim()
-        if (text.isEmpty() || isRunning) return
+        if (text.isEmpty() || isRunning(talker)) return
+        AgentConfigStore.ensureInitialized()
+        val cfg = AgentConfigStore.getConfig()
+        val session = AgentSessionStore.getOrLoad(talker, titleHint)
+        val now = System.currentTimeMillis()
+        synchronized(session) {
+            session.timeline += TimelineItem(
+                id = session.nextId(),
+                kind = "master",
+                senderName = "master",
+                timestampMs = now,
+                timeText = formatBubbleTime(now),
+                text = text,
+            )
+        }
+        if (!cfg.hasApiKey) {
+            AgentLoopRunner.appendError(
+                session,
+                "未配置 API Key：请在右上角快速填入，或编辑 ${AgentConfigStore.modelsFile().absolutePath}",
+            )
+            AgentSessionStore.persist(session)
+            notifyTimeline(talker)
+            return
+        }
+        startWorker(talker, session, cfg, InvocationMode.PANEL_MASTER, sendReplyToWeChat = false)
+    }
+
+    fun submitChatTrigger(talker: String, isMaster: Boolean) {
         AgentConfigStore.ensureInitialized()
         val cfg = AgentConfigStore.getConfig()
         if (!cfg.hasApiKey) {
-            appendItem(UiItem(nextId(), "user", text = text))
-            appendItem(
-                UiItem(
-                    nextId(),
-                    "error",
-                    text = "未配置 API Key：请在右上角快速填入，或直接编辑 ${AgentConfigStore.modelsFile().absolutePath}",
-                    isError = true,
-                ),
-            )
+            AcidLogger.w(TAG, "skipping @ trigger for $talker: API key not configured")
             return
         }
-
-        val gen = runGen.incrementAndGet()
-        stopRequested = false
-        isRunning = true
-        currentStep = 0
-        appendItem(UiItem(nextId(), "user", text = text))
-        synchronized(apiMessages) {
-            apiMessages.add(JSONObject().put("role", "user").put("content", text))
-        }
-        notifyState()
-
-        workerThread = Thread({
-            runLoop(cfg, gen)
-        }, "AcidWeChatAgent").apply { isDaemon = true; start() }
+        val session = AgentSessionStore.getOrLoad(talker)
+        val mode = if (isMaster) InvocationMode.CHAT_TRIGGER_MASTER else InvocationMode.CHAT_TRIGGER_GUEST
+        startWorker(talker, session, cfg, mode, sendReplyToWeChat = true)
     }
 
-    private fun runLoop(cfg: AgentConfigStore.ModelConfig, gen: Int) {
-        val toolsSchema = AgentToolRegistry.buildToolsSchema()
-        try {
-            for (step in 1..cfg.maxSteps) {
-                if (isCancelled(gen)) break
-                currentStep = step
-                notifyState()
+    fun triggerManualCompact(talker: String): AgentMemoryCompactor.CompactOutcome {
+        if (isRunning(talker)) return AgentMemoryCompactor.CompactOutcome(false, error = "Agent 正在运行中，请稍候再压缩")
+        AgentConfigStore.ensureInitialized()
+        val cfg = AgentConfigStore.getConfig()
+        val outcome = AgentSessionStore.compactSession(talker, cfg)
+        if (outcome.ok) {
+            notifyTimeline(talker)
+            notifyState(talker)
+        }
+        return outcome
+    }
 
-                val reqMessages = buildApiRequestMessages()
-                var thinkItem: UiItem? = null
-                var replyItem: UiItem? = null
-                var lastPushMs = 0L
+    fun sendTextToChat(talker: String, text: String): WeChatSender.SendResult {
+        val clean = AgentContextBuilder.cleanForWeChat(text)
+        if (clean.isEmpty()) return WeChatSender.SendResult(false, "内容为空")
+        AgentSentTracker.markSent(talker, clean)
+        val res = WeChatSender.sendText(talker, clean)
+        if (!res.ok) AgentSentTracker.consumeIfSentByAgent(talker, clean)
+        return res
+    }
 
-                val assistantMsg = AcidLlmClient.streamChatCompletion(
-                    cfg = cfg,
-                    messages = reqMessages,
-                    toolsSchema = toolsSchema,
-                    step = step,
-                    cb = AcidLlmClient.StreamCallbacks(
-                        isCancelled = { isCancelled(gen) },
-                        onConnectionOpened = { activeConn = it },
-                        onReasoningDelta = { full ->
-                            if (thinkItem == null) {
-                                thinkItem = UiItem(nextId(), "thinking", text = full, running = true)
-                                appendItem(thinkItem!!)
-                            } else {
-                                thinkItem!!.text = full
-                                val now = System.currentTimeMillis()
-                                if (now - lastPushMs >= 60L) {
-                                    lastPushMs = now
-                                    notifyItems()
-                                }
-                            }
-                        },
-                        onContentDelta = { full ->
-                            thinkItem?.takeIf { it.running }?.let { it.running = false }
-                            if (replyItem == null) {
-                                replyItem = UiItem(nextId(), "assistant", text = full, running = true)
-                                appendItem(replyItem!!)
-                            } else {
-                                replyItem!!.text = full
-                                val now = System.currentTimeMillis()
-                                if (now - lastPushMs >= 60L) {
-                                    lastPushMs = now
-                                    notifyItems()
-                                }
-                            }
-                        },
-                        onUsage = { _, _, tt ->
-                            lastTotalTokens = tt
-                            notifyState()
-                        },
-                    ),
-                ) ?: break
+    private fun startWorker(
+        talker: String,
+        session: ChatSessionState,
+        cfg: AgentConfigStore.ModelConfig,
+        mode: InvocationMode,
+        sendReplyToWeChat: Boolean,
+    ) {
+        val rs = runStates.getOrPut(talker) { RunState() }
+        val gen = rs.runGen.incrementAndGet()
+        rs.stopRequested = false
+        rs.isRunning = true
+        rs.currentStep = 0
+        notifyTimeline(talker)
+        notifyState(talker)
 
-                thinkItem?.let { it.running = false }
-                replyItem?.let { it.running = false }
-                notifyItems()
-
-                synchronized(apiMessages) { apiMessages.add(assistantMsg) }
-
-                val toolCalls = assistantMsg.optJSONArray("tool_calls")
-                if (toolCalls == null || toolCalls.length() == 0) break
-
-                executeToolBatch(toolCalls, step, gen)
-            }
-        } catch (t: Throwable) {
-            if (!isCancelled(gen)) {
-                AcidLogger.w(TAG, "agent loop failed", t)
-                appendItem(UiItem(nextId(), "error", text = "请求异常: ${t.message}", isError = true))
-            }
-        } finally {
-            activeConn = null
-            if (runGen.get() == gen) {
-                isRunning = false
-                synchronized(uiItems) {
-                    uiItems.forEach { if (it.running) it.running = false }
-                }
-                notifyItems()
-                notifyState()
-            }
+        Thread({
+            AgentLoopRunner.execute(
+                talker = talker,
+                session = session,
+                rs = rs,
+                cfg = cfg,
+                mode = mode,
+                sendReplyToWeChat = sendReplyToWeChat,
+                gen = gen,
+                notifyTimeline = ::notifyTimeline,
+                notifyState = ::notifyState,
+            )
+        }, "AcidAgent-${AgentConfigStore.sanitizeTalkerKey(talker).take(16)}").apply {
+            isDaemon = true
+            start()
         }
     }
 
-    private fun executeToolBatch(toolCalls: JSONArray, step: Int, gen: Int) {
-        var executed = 0
-        try {
-            for (i in 0 until toolCalls.length()) {
-                if (isCancelled(gen)) break
-                val tc = toolCalls.optJSONObject(i) ?: continue
-                val callId = tc.optString("id", "call_${step}_$i")
-                val fn = tc.optJSONObject("function")
-                val toolName = fn?.optString("name", "") ?: ""
-                val rawArgs = fn?.optString("arguments", "{}") ?: "{}"
+    private fun notifyTimeline(talker: String) {
+        for (l in listeners) runCatching { l.onTimelineChanged(talker) }
+    }
 
-                val parsedArgs = runCatching {
-                    if (rawArgs.isBlank()) JSONObject() else JSONObject(rawArgs)
-                }
-                val summary = parsedArgs.getOrNull()?.let { summarizeTool(toolName, it) } ?: "$toolName · invalid JSON"
-                val uiItem = UiItem(
-                    id = nextId(),
-                    type = "tool",
-                    toolName = toolName,
-                    toolSummary = summary,
-                    toolArgs = parsedArgs.getOrNull()?.toString(2) ?: rawArgs,
-                    toolResult = "执行中...",
-                    running = true,
-                )
-                appendItem(uiItem)
-
-                val result = parsedArgs.getOrNull()?.let { AgentToolRegistry.execute(toolName, it) }
-                    ?: ToolResult("Error: Malformed JSON arguments: ${parsedArgs.exceptionOrNull()?.message}", true)
-                if (isCancelled(gen)) break
-
-                uiItem.running = false
-                uiItem.toolResult = result.output
-                uiItem.isError = result.isError
-                notifyItems()
-
-                synchronized(apiMessages) {
-                    apiMessages.add(JSONObject().apply {
-                        put("role", "tool")
-                        put("tool_call_id", callId)
-                        put("name", toolName)
-                        put("content", result.output)
-                    })
-                }
-                executed++
-            }
-        } finally {
-            if (executed < toolCalls.length()) {
-                synchronized(apiMessages) {
-                    for (j in executed until toolCalls.length()) {
-                        val tc = toolCalls.optJSONObject(j) ?: continue
-                        val callId = tc.optString("id", "call_${step}_$j")
-                        val tName = tc.optJSONObject("function")?.optString("name", "tool") ?: "tool"
-                        apiMessages.add(JSONObject().apply {
-                            put("role", "tool")
-                            put("tool_call_id", callId)
-                            put("name", tName)
-                            put("content", "[Execution stopped]")
-                        })
-                    }
-                }
-            }
+    private fun notifyState(talker: String) {
+        val rs = runStates[talker]
+        val session = AgentSessionStore.getOrLoad(talker)
+        val running = rs?.isRunning == true
+        val step = rs?.currentStep ?: 0
+        val tokens = session.lastTotalTokens
+        val compactCount = session.compactCount
+        for (l in listeners) {
+            runCatching { l.onStateChanged(talker, running, step, tokens, compactCount) }
         }
-    }
-
-    private fun buildApiRequestMessages(): JSONArray {
-        val sys = JSONObject().put("role", "system").put("content", buildSystemPrompt())
-        return JSONArray().apply {
-            put(sys)
-            synchronized(apiMessages) {
-                for (m in apiMessages) put(m)
-            }
-        }
-    }
-
-    private fun buildSystemPrompt(): String {
-        val wsPath = AgentConfigStore.workspaceDir().absolutePath
-        val cfgSchema = ConfigSchema.describeJsonSchemaForPrompt(ConfigStore.configFile().absolutePath)
-        return """
-You are Acid Agent, an autonomous AI assistant embedded inside Acid-WeChat on Android.
-You have access to 5 core tools:
-1. `wechat`: Inspect module status, search contacts/chatrooms, read chat history, send real WeChat text messages, apply fake likes/comments (by explicit sns_id), or patch `config.json`. (Moments browsing is disabled.)
-2. `read`: Read UTF-8 files in your dedicated workspace (`$wsPath`) as well as `config.json`, `config.schema.json`, and `acid.log`.
-3. `write`: Create or overwrite UTF-8 files inside `$wsPath` or update `config.json`.
-4. `edit`: Perform exact literal replacements in workspace files or `config.json`.
-5. `bash`: Run `/system/bin/sh -c` commands inside `$wsPath`.
-
-Rules:
-- Dedicated workspace: All scratch scripts, notes, reports, and data files belong in `$wsPath`.
-- Sending WeChat messages: Before calling `wechat(action='send_message', ...)`, resolve the recipient cleanly via `search_contacts` / `list_chats` / `read_messages` if the contact name could match multiple people. Verify intent carefully for external actions.
-- Settings SSOT: $cfgSchema Changes via `write`/`edit`/`wechat(action='config_patch')` hot-reload live into running hooks.
-- Respond in Simplified Chinese (简体中文) by default with crisp Markdown formatting unless the user asks in another language.
-        """.trimIndent()
-    }
-
-    private fun summarizeTool(name: String, args: JSONObject): String = when (name) {
-        "wechat" -> {
-            val act = args.optString("action", "?")
-            val target = args.optString("talker", args.optString("query", args.optString("sns_id", "")))
-            if (target.isNotEmpty()) "$act · $target" else act
-        }
-        "read", "write", "edit" -> args.optString("file_path", name)
-        "bash" -> args.optString("command", "").replace('\n', ' ').take(48)
-        else -> name
-    }
-
-    private fun isCancelled(gen: Int): Boolean = stopRequested || runGen.get() != gen
-    private fun nextId(): String = "m_${idSeq.incrementAndGet()}"
-
-    private fun appendItem(item: UiItem) {
-        synchronized(uiItems) { uiItems.add(item) }
-        notifyItems()
-    }
-
-    private fun notifyItems() {
-        val snap = snapshotUiItems()
-        for (l in listeners) runCatching { l.onItemsChanged(snap) }
-    }
-
-    private fun notifyState() {
-        for (l in listeners) runCatching { l.onStateChanged(isRunning, currentStep, lastTotalTokens) }
     }
 }

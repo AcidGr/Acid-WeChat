@@ -31,6 +31,8 @@ object ChatQueryRepository {
         val typeLabel: String,
         val timeText: String,
         val content: String,
+        val createTimeMs: Long = 0L,
+        val senderWxid: String? = null,
     )
 
     sealed class TalkerResolution {
@@ -152,11 +154,11 @@ object ChatQueryRepository {
         val sql: String
         val args: Array<String>
         if (kw.isNotEmpty()) {
-            sql = "SELECT msgId, msgSvrId, type, isSend, createTime, content FROM message " +
+            sql = "SELECT msgId, msgSvrId, type, isSend, createTime, content, imgPath FROM message " +
                 "WHERE talker = ? AND content LIKE ? ORDER BY createTime DESC LIMIT ? OFFSET ?"
             args = arrayOf(talker, "%$kw%", capped.toString(), off.toString())
         } else {
-            sql = "SELECT msgId, msgSvrId, type, isSend, createTime, content FROM message " +
+            sql = "SELECT msgId, msgSvrId, type, isSend, createTime, content, imgPath FROM message " +
                 "WHERE talker = ? ORDER BY createTime DESC LIMIT ? OFFSET ?"
             args = arrayOf(talker, capped.toString(), off.toString())
         }
@@ -170,8 +172,14 @@ object ChatQueryRepository {
                 val isSend = c.getInt(3) != 0
                 val ts = c.getLong(4)
                 val raw = c.getString(5).orEmpty()
-                val sender = if (isSend) "我" else ChatRepository.resolveSenderDisplayName(talker, raw, null)
-                val body = formatMessageContent(talker, isSend, type, raw)
+                val imgPath = c.getString(6).orEmpty()
+                val senderWxid = when {
+                    isSend -> ChatRepository.querySelfWxid()
+                    talker.endsWith("@chatroom") -> ChatRepository.extractGroupSenderWxid(raw)
+                    else -> talker
+                }
+                val sender = if (isSend) "master" else ChatRepository.resolveSenderDisplayName(talker, raw, null)
+                val body = formatMessageBody(talker, isSend, type, raw, msgId, imgPath, msgSvrId)
                 rows += MessageSummary(
                     msgId = msgId,
                     msgSvrId = msgSvrId,
@@ -182,6 +190,8 @@ object ChatQueryRepository {
                     typeLabel = msgTypeLabel(type),
                     timeText = formatTime(ts),
                     content = body,
+                    createTimeMs = ts,
+                    senderWxid = senderWxid,
                 )
             }
         }
@@ -190,20 +200,43 @@ object ChatQueryRepository {
         AcidLogger.w(TAG, "queryMessages failed", it)
     }.getOrDefault(emptyList())
 
-    private fun formatMessageContent(talker: String, isSend: Boolean, type: Int, raw: String): String {
-        val stripped = if (talker.endsWith("@chatroom") && !isSend) {
-            val idx = raw.indexOf(":\n")
-            if (idx in 1..64) raw.substring(idx + 2) else raw
-        } else {
-            raw
-        }
+    private val titleTagRegex = Regex("<title>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</title>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+
+    fun stripGroupPrefix(talker: String, isSend: Boolean, raw: String): String {
+        if (!talker.endsWith("@chatroom") || isSend) return raw
+        val idx = raw.indexOf(":\n")
+        return if (idx in 1..64) raw.substring(idx + 2) else raw
+    }
+
+    fun extractAppMsgTitle(stripped: String): String? =
+        titleTagRegex.find(stripped)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
+
+    fun formatMessageBody(
+        talker: String,
+        isSend: Boolean,
+        type: Int,
+        raw: String,
+        msgId: Long = 0L,
+        imgPath: String = "",
+        msgSvrId: Long = 0L,
+    ): String {
+        val stripped = stripGroupPrefix(talker, isSend, raw)
         return when (type) {
             1 -> stripped.trim()
-            3 -> "[图片]"
-            34 -> "[语音]"
+            3 -> ChatImageRepository.resolveMessageImagePath(msgId, msgSvrId, imgPath)
+                ?.let { "[图片: $it]" }
+                ?: "[图片]"
+            34 -> {
+                val transcript = if (msgId > 0L || imgPath.isNotEmpty()) {
+                    ChatRepository.queryVoiceTranscript(msgId, imgPath)
+                } else {
+                    null
+                }
+                if (!transcript.isNullOrBlank()) "[语音: ${transcript.trim()}]" else "[语音]"
+            }
             43 -> "[视频]"
             47 -> "[动画表情]"
-            49 -> "[卡片/文件/链接消息] " + stripped.replace('\n', ' ').take(160)
+            49 -> extractAppMsgTitle(stripped) ?: ("[卡片/文件/链接消息] " + stripped.replace('\n', ' ').take(160))
             10000 -> "[系统提示] " + stripped.trim()
             else -> "[${msgTypeLabel(type)}] " + stripped.replace('\n', ' ').take(160)
         }

@@ -13,6 +13,7 @@ import java.lang.ref.WeakReference
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * WeChat-specific adapter bridging `VoiceMsgDownloadFinishEvent`, `ExtTranslateVoiceEvent`,
@@ -68,6 +69,11 @@ object VoiceTransBridge {
     @Volatile private var eventReflector: EventReflector? = null
     @Volatile private var dlFinishReflector: DlFinishReflector? = null
     @Volatile private var activeChattingContext: WeakReference<Any>? = null
+    private val transcriptObservers = CopyOnWriteArrayList<(Long, String, String) -> Unit>()
+
+    fun addTranscriptObserver(observer: (msgId: Long, talker: String, text: String) -> Unit) {
+        transcriptObservers.add(observer)
+    }
 
     fun registerDexRules() {
         ruleEventAsyncPublish = DexKitLocator.registerMethod(
@@ -240,11 +246,15 @@ object VoiceTransBridge {
         ref.reqTalkerField.set(req, talker)
         ref.reqCallbackField.set(req, Runnable {
             val resp = ref.respField.get(event)
-            onResult(
-                ref.respFinishedField.getBoolean(resp),
-                ref.respTextField.get(resp) as? String,
-                ref.respStatusField.getInt(resp),
-            )
+            val finished = ref.respFinishedField.getBoolean(resp)
+            val text = ref.respTextField.get(resp) as? String
+            val status = ref.respStatusField.getInt(resp)
+            if (finished && !text.isNullOrBlank()) {
+                for (obs in transcriptObservers) {
+                    runCatching { obs(msgId, talker, text) }
+                }
+            }
+            onResult(finished, text, status)
         })
         return (ref.publishMethod.invoke(event) as? Boolean) ?: true
     }
