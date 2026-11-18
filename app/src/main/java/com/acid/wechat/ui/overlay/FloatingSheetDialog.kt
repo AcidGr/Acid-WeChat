@@ -8,13 +8,14 @@ import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowManager
 import android.webkit.WebView
 import android.widget.FrameLayout
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.ui.WebViewHost
 
 /**
- * Reusable pure-white floating bottom-sheet WebView container invoked by external floating triggers.
+ * Reusable centered pure-white floating card WebView container with fixed position during IME input.
  */
 object FloatingSheetDialog {
     private const val TAG = "FloatingSheetDialog"
@@ -23,29 +24,34 @@ object FloatingSheetDialog {
         activity: Activity,
         assetPath: String,
         bridgeName: String,
-        heightRatio: Float = 0.82f,
+        widthRatio: Float = 0.90f,
+        heightRatio: Float = 0.68f,
         bridgeFactory: (Dialog, WebView) -> Any,
     ): Dialog? {
         return runCatching {
-            val density = activity.resources.displayMetrics.density
-            val screenH = activity.resources.displayMetrics.heightPixels
-            val cardHeight = (screenH * heightRatio.coerceIn(0.45f, 0.92f)).toInt()
+            val dm = activity.resources.displayMetrics
+            val density = dm.density
+            val maxW = (420f * density).toInt()
+            val cardWidth = (dm.widthPixels * widthRatio.coerceIn(0.65f, 0.96f)).toInt().coerceAtMost(maxW)
+            val cardHeight = (dm.heightPixels * heightRatio.coerceIn(0.42f, 0.85f)).toInt()
 
             WebViewHost.showHtmlDialog(
                 activity = activity,
                 assetPath = assetPath,
                 bridgeName = bridgeName,
                 styleResId = android.R.style.Theme_Translucent_NoTitleBar,
+                softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING or
+                    WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN,
                 windowSetup = { dialog ->
                     dialog.window?.apply {
-                        setBackgroundDrawable(ColorDrawable(Color.parseColor("#66000000")))
+                        setBackgroundDrawable(ColorDrawable(Color.parseColor("#59000000")))
                         setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     }
                     dialog.setCanceledOnTouchOutside(true)
                 },
                 bridgeFactory = bridgeFactory,
                 containerFactory = { webView, dialog ->
-                    buildSheetContainer(activity, webView, dialog, density, cardHeight)
+                    buildFloatingContainer(activity, webView, dialog, density, cardWidth, cardHeight)
                 },
             )
         }.onFailure {
@@ -53,11 +59,12 @@ object FloatingSheetDialog {
         }.getOrNull()
     }
 
-    private fun buildSheetContainer(
+    private fun buildFloatingContainer(
         activity: Activity,
         webView: WebView,
         dialog: Dialog,
         density: Float,
+        cardWidth: Int,
         cardHeight: Int,
     ): View {
         val backdrop = FrameLayout(activity).apply {
@@ -68,10 +75,12 @@ object FloatingSheetDialog {
         val card = FrameLayout(activity).apply {
             clipToOutline = true
             isClickable = true
+            elevation = 14f * density
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
-                cornerRadii = floatArrayOf(radiusPx, radiusPx, radiusPx, radiusPx, 0f, 0f, 0f, 0f)
+                cornerRadius = radiusPx
                 setColor(Color.WHITE)
+                setStroke((0.8f * density).toInt().coerceAtLeast(1), Color.parseColor("#ECEEF2"))
             }
             addView(
                 webView,
@@ -84,11 +93,7 @@ object FloatingSheetDialog {
 
         backdrop.addView(
             card,
-            FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                cardHeight,
-                Gravity.BOTTOM,
-            ),
+            FrameLayout.LayoutParams(cardWidth, cardHeight, Gravity.CENTER),
         )
         return backdrop
     }

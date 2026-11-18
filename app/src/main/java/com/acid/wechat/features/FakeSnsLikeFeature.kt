@@ -203,7 +203,8 @@ object FakeSnsLikeFeature : AcidFeature {
             activity = activity,
             assetPath = "assets/fake_like_sheet.html",
             bridgeName = "FakeLikeBridge",
-            heightRatio = 0.84f,
+            widthRatio = 0.90f,
+            heightRatio = 0.68f,
             bridgeFactory = { dialog, _ -> FakeLikeBridge(activity, dialog, snsId) },
         )
     }

@@ -42,6 +42,7 @@ object WebViewHost {
         assetPath: String,
         bridgeName: String,
         styleResId: Int,
+        softInputMode: Int = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN,
         windowSetup: (Dialog) -> Unit,
         bridgeFactory: (Dialog, WebView) -> Any,
         containerFactory: (WebView, Dialog) -> View = { wv, _ -> wv },
@@ -57,10 +58,7 @@ object WebViewHost {
         dialog.window?.apply {
             clearFlags(WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM)
             @Suppress("DEPRECATION")
-            setSoftInputMode(
-                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
-                    WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN,
-            )
+            setSoftInputMode(softInputMode)
         }
 
         val webView = WebView(activity).apply {
