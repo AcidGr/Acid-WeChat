@@ -181,17 +181,27 @@
     min-width: 0;
   }
   .avatar {
-    width: 30px;
-    height: 30px;
+    position: relative;
+    width: 34px;
+    height: 34px;
     border-radius: 8px;
     background: var(--sub-bg);
     color: #4B5563;
-    font-size: 13px;
+    font-size: 13.5px;
     font-weight: 600;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    overflow: hidden;
+  }
+  .avatar-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
   }
   .friend-names {
     min-width: 0;
@@ -298,10 +308,7 @@
 
   <div class="section">
     <div class="rand-row">
-      <input class="rand-input" id="randCount" type="number" min="1" max="999" value="10" />
-      <button class="pill-btn" onclick="setRandAndPick(10)">10</button>
-      <button class="pill-btn" onclick="setRandAndPick(20)">20</button>
-      <button class="pill-btn" onclick="setRandAndPick(50)">50</button>
+      <input class="rand-input" id="randCount" type="number" min="1" max="999" value="10" placeholder="赞数" />
       <button class="pill-btn primary-soft" onclick="pickRandom()">随机勾选</button>
       <button class="pill-btn" onclick="clearFake()">清空</button>
     </div>
@@ -358,11 +365,6 @@
     renderFriends();
   }
 
-  function setRandAndPick(n) {
-    document.getElementById("randCount").value = n;
-    pickRandom();
-  }
-
   function pickRandom() {
     const n = parseInt(document.getElementById("randCount").value, 10);
     if (!n || n <= 0) return;
@@ -415,6 +417,7 @@
       const isReal = realSet.has(f.username);
       const isChecked = selectedSet.has(f.username);
       const initial = escapeHtml((f.displayName || "?").slice(0, 1));
+      const avatarUrl = `https://acid.local/avatar/${encodeURIComponent(f.username)}`;
       const subHtml = f.subName ? `<div class="friend-sub">${escapeHtml(f.subName)}</div>` : "";
       const rightHtml = isReal
         ? '<span class="badge-real">已真赞</span>'
@@ -422,7 +425,7 @@
       return `
         <div class="friend-row ${isReal ? 'locked' : ''}" onclick="toggleFriend('${escapeAttr(f.username)}')">
           <div class="friend-main">
-            <div class="avatar">${initial}</div>
+            <div class="avatar"><span>${initial}</span><img class="avatar-img" src="${avatarUrl}" loading="lazy" onerror="this.remove()" /></div>
             <div class="friend-names">
               <div class="friend-name">${escapeHtml(f.displayName)}</div>
               ${subHtml}

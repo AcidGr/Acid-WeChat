@@ -4,10 +4,14 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.Dialog
 import android.graphics.Color
+import android.net.Uri
 import android.view.View
 import android.view.WindowManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
+import android.webkit.WebViewClient
 import android.widget.Toast
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.core.HostContext
@@ -45,6 +49,7 @@ object WebViewHost {
         softInputMode: Int = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN,
         windowSetup: (Dialog) -> Unit,
         bridgeFactory: (Dialog, WebView) -> Any,
+        requestInterceptor: ((Uri) -> WebResourceResponse?)? = null,
         containerFactory: (WebView, Dialog) -> View = { wv, _ -> wv },
     ): Dialog? {
         if (activity.isFinishing || activity.isDestroyed) return null
@@ -70,6 +75,17 @@ object WebViewHost {
                 javaScriptEnabled = true
                 domStorageEnabled = true
                 cacheMode = WebSettings.LOAD_NO_CACHE
+            }
+            if (requestInterceptor != null) {
+                webViewClient = object : WebViewClient() {
+                    override fun shouldInterceptRequest(
+                        view: WebView?,
+                        request: WebResourceRequest?,
+                    ): WebResourceResponse? {
+                        val url = request?.url ?: return null
+                        return runCatching { requestInterceptor(url) }.getOrNull()
+                    }
+                }
             }
         }
 

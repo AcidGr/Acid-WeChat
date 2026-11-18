@@ -1,7 +1,11 @@
 package com.acid.wechat.wechat
 
 import android.content.ContentValues
+import com.acid.wechat.core.HostContext
 import com.acid.wechat.core.WcdbBridge
+import java.io.File
+import java.io.FileInputStream
+import java.security.MessageDigest
 
 /**
  * Read-only WeChat chat/contact repository backed by [WcdbBridge] (`EnMicroMsg.db`).
@@ -123,6 +127,76 @@ object ChatRepository {
         }
         result
     }.getOrDefault(emptyList())
+
+    /**
+     * Resolves a friend's locally cached WeChat avatar image file and MIME type, or null if absent.
+     */
+    fun findCachedAvatar(username: String): Pair<File, String>? = runCatching {
+        if (username.isBlank()) return@runCatching null
+        val root = resolveAvatarDir() ?: return@runCatching null
+        val md5 = md5Hex(username)
+        val subDir = File(root, "${md5.substring(0, 2)}/${md5.substring(2, 4)}")
+        if (!subDir.isDirectory) return@runCatching null
+
+        val directCandidates = listOf(
+            File(subDir, "user_$md5.png"),
+            File(subDir, "user_hd_$md5.png"),
+        )
+        for (file in directCandidates) {
+            detectImageMime(file)?.let { return@runCatching file to it }
+        }
+
+        val innerDir = File(subDir, md5)
+        if (innerDir.isDirectory) {
+            val innerFiles = innerDir.listFiles()
+                ?.filter { it.isFile && (it.name.startsWith("small_") || it.name.startsWith("hd_")) }
+                ?.sortedByDescending { it.lastModified() }
+                .orEmpty()
+            for (file in innerFiles) {
+                detectImageMime(file)?.let { return@runCatching file to it }
+            }
+        }
+        null
+    }.getOrNull()
+
+    private fun resolveAvatarDir(): File? {
+        WcdbBridge.mainDbPath()?.let { dbPath ->
+            val dir = File(dbPath).parentFile?.let { File(it, "avatar") }
+            if (dir != null && dir.isDirectory) return dir
+        }
+        val mmRoot = HostContext.app.filesDir.parentFile?.let { File(it, "MicroMsg") } ?: return null
+        return mmRoot.listFiles()
+            ?.firstOrNull { it.isDirectory && it.name.length == 32 && File(it, "avatar").isDirectory }
+            ?.let { File(it, "avatar") }
+    }
+
+    private fun detectImageMime(file: File): String? {
+        if (!file.isFile || !file.canRead() || file.length() < 12) return null
+        val hdr = ByteArray(12)
+        val read = FileInputStream(file).use { it.read(hdr) }
+        if (read < 4) return null
+        val b0 = hdr[0].toInt() and 0xFF
+        val b1 = hdr[1].toInt() and 0xFF
+        val b2 = hdr[2].toInt() and 0xFF
+        val b3 = hdr[3].toInt() and 0xFF
+        return when {
+            b0 == 0x89 && b1 == 0x50 && b2 == 0x4E && b3 == 0x47 -> "image/png"
+            b0 == 0xFF && b1 == 0xD8 -> "image/jpeg"
+            b0 == 0x52 && b1 == 0x49 && b2 == 0x46 && b3 == 0x46 -> "image/webp"
+            else -> null
+        }
+    }
+
+    private fun md5Hex(input: String): String {
+        val digest = MessageDigest.getInstance("MD5").digest(input.toByteArray(Charsets.UTF_8))
+        val sb = StringBuilder(32)
+        for (b in digest) {
+            val v = b.toInt() and 0xFF
+            if (v < 16) sb.append('0')
+            sb.append(v.toString(16))
+        }
+        return sb.toString()
+    }
 
     private fun extractGroupSenderWxid(content: String?): String? {
         if (content.isNullOrEmpty()) return null

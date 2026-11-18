@@ -4,10 +4,12 @@ import android.app.Activity
 import android.app.Dialog
 import android.content.Context
 import android.content.ContextWrapper
+import android.net.Uri
 import android.view.ContextMenu
 import android.view.MenuItem
 import android.view.View
 import android.webkit.JavascriptInterface
+import android.webkit.WebResourceResponse
 import android.widget.Toast
 import com.acid.wechat.core.AcidFeature
 import com.acid.wechat.core.AcidLogger
@@ -25,23 +27,25 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.FileInputStream
 import java.util.Collections
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Moments Fake Likes feature:
- * - Injects a "伪集赞" item into WeChat's native Moment long-press menu
- *   (`TimelineOnCreateContextMenuListener` + `TimeLineMMMenuItemSelectedListener`).
- * - Opens a bottom sheet pre-targeted to the long-pressed Moment `snsId` for manual
- *   friend picking or random N-friend selection.
+ * - Injects "伪集赞" (or "清除伪集赞" when already fake-liked) into WeChat's native Moment long-press menu.
+ * - Opens a centered floating panel pre-targeted to the long-pressed Moment `snsId`, displaying
+ *   cached WeChat avatars, friend search, and custom-count random selection.
  * - Preserves fake likes across server syncs via WcdbBridge SnsInfo update interception.
  */
 object FakeSnsLikeFeature : AcidFeature {
     private const val TAG = "FakeSnsLike"
     private const val TBL_SNS_INFO = "SnsInfo"
     private const val MENU_ITEM_FAKE_LIKE_ID = 198901
-    private const val MENU_ITEM_TITLE = "伪集赞"
+    private const val MENU_ITEM_CLEAR_FAKE_LIKE_ID = 198902
+    private const val MENU_TITLE_FAKE_LIKE = "伪集赞"
+    private const val MENU_TITLE_CLEAR_FAKE_LIKE = "清除伪集赞"
 
     private data class SelectedPostContext(
         val snsId: Long,
@@ -53,6 +57,11 @@ object FakeSnsLikeFeature : AcidFeature {
     private lateinit var ruleMenuItemSelected: DexKitLocator.DexRule
 
     private val selectedPosts = Collections.synchronizedMap(WeakHashMap<Any, SelectedPostContext>())
+    private val viewSnsIds = Collections.synchronizedMap(WeakHashMap<View, Long>())
+
+    @Volatile
+    private var latestMenuSnsId: Long = 0L
+
     private val appliedCount = AtomicInteger(0)
 
     override val id = "fake_like"
@@ -114,11 +123,24 @@ object FakeSnsLikeFeature : AcidFeature {
         val m = ruleContextMenuCreate.resolveMethod() ?: return
         runCatching {
             XposedBridge.hookMethod(m, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    latestMenuSnsId = 0L
+                }
+
                 override fun afterHookedMethod(param: MethodHookParam) {
                     if (!FeatureRegistry.isEnabled(this@FakeSnsLikeFeature)) return
                     val menu = param.args?.getOrNull(0) as? ContextMenu ?: return
-                    if (menu.findItem(MENU_ITEM_FAKE_LIKE_ID) == null) {
-                        menu.add(0, MENU_ITEM_FAKE_LIKE_ID, 0, MENU_ITEM_TITLE)
+                    val view = param.args?.getOrNull(1) as? View
+                    val snsId = (latestMenuSnsId.takeIf { it != 0L } ?: view?.let { viewSnsIds[it] })
+                        ?: unwrapActivity(view?.context)?.let(SnsRepository::extractSnsIdFromIntent)
+                        ?: 0L
+                    val hasFakeLikes = snsId != 0L && SnsFakeLikeStore.getUsernames(snsId).isNotEmpty()
+                    if (hasFakeLikes) {
+                        if (menu.findItem(MENU_ITEM_CLEAR_FAKE_LIKE_ID) == null) {
+                            menu.add(0, MENU_ITEM_CLEAR_FAKE_LIKE_ID, 0, MENU_TITLE_CLEAR_FAKE_LIKE)
+                        }
+                    } else if (menu.findItem(MENU_ITEM_FAKE_LIKE_ID) == null) {
+                        menu.add(0, MENU_ITEM_FAKE_LIKE_ID, 0, MENU_TITLE_FAKE_LIKE)
                     }
                 }
             })
@@ -141,6 +163,8 @@ object FakeSnsLikeFeature : AcidFeature {
                     val activity = unwrapActivity(view?.context) ?: findActivityField(listener)
                     val snsId = SnsRepository.resolveSnsId(tlObj, snsTableId, activity) ?: return
                     selectedPosts[listener] = SelectedPostContext(snsId, activity)
+                    if (view != null) viewSnsIds[view] = snsId
+                    latestMenuSnsId = snsId
                 }
             })
         }.onFailure {
@@ -156,7 +180,8 @@ object FakeSnsLikeFeature : AcidFeature {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (!FeatureRegistry.isEnabled(this@FakeSnsLikeFeature)) return
                     val menuItem = param.args?.getOrNull(0) as? MenuItem ?: return
-                    if (menuItem.itemId != MENU_ITEM_FAKE_LIKE_ID) return
+                    val itemId = menuItem.itemId
+                    if (itemId != MENU_ITEM_FAKE_LIKE_ID && itemId != MENU_ITEM_CLEAR_FAKE_LIKE_ID) return
 
                     param.result = null
                     val listener = param.thisObject ?: return
@@ -164,16 +189,47 @@ object FakeSnsLikeFeature : AcidFeature {
                     val activity = ctx?.activity ?: findActivityField(listener)
                     val snsId = ctx?.snsId ?: activity?.let(SnsRepository::extractSnsIdFromIntent)
                     if (activity == null || snsId == null || snsId == 0L) {
-                        AcidLogger.w(TAG, "cannot open fake-like sheet: activity=$activity snsId=$snsId")
+                        AcidLogger.w(TAG, "cannot handle menu action: activity=$activity snsId=$snsId")
                         return
                     }
-                    openSheet(activity, snsId)
+                    if (itemId == MENU_ITEM_CLEAR_FAKE_LIKE_ID) {
+                        clearFakeLikesForPost(activity, snsId)
+                    } else {
+                        openSheet(activity, snsId)
+                    }
                 }
             })
         }.onFailure {
             FeatureRegistry.recordError(id, it)
             AcidLogger.w(TAG, "hookMenuItemSelected failed", it)
         }
+    }
+
+    private fun clearFakeLikesForPost(activity: Activity, snsId: Long) {
+        val fakeUsernames = SnsFakeLikeStore.getUsernames(snsId)
+        if (fakeUsernames.isEmpty()) {
+            Toast.makeText(activity, "当前动态没有伪集赞记录", Toast.LENGTH_SHORT).show()
+            return
+        }
+        Thread {
+            SnsFakeLikeStore.set(snsId, emptyList())
+            val (ok, totalLikes) = SnsRepository.applyLikesToPost(
+                snsId = snsId,
+                desiredFakeLikes = emptyList(),
+                removedFakeUsernames = fakeUsernames,
+                currentActivity = activity,
+            )
+            if (ok) {
+                FeatureRegistry.recordHit(id)
+                activity.runOnUiThread {
+                    Toast.makeText(activity, "已清除伪集赞（真实赞 $totalLikes）", Toast.LENGTH_SHORT).show()
+                }
+            } else {
+                activity.runOnUiThread {
+                    Toast.makeText(activity, "清除失败，请刷新朋友圈后再试", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
     }
 
     private fun hookSnsSyncPreserve() {
@@ -205,7 +261,24 @@ object FakeSnsLikeFeature : AcidFeature {
             bridgeName = "FakeLikeBridge",
             widthRatio = 0.90f,
             heightRatio = 0.68f,
+            requestInterceptor = ::interceptAvatarRequest,
             bridgeFactory = { dialog, _ -> FakeLikeBridge(activity, dialog, snsId) },
+        )
+    }
+
+    private fun interceptAvatarRequest(url: Uri): WebResourceResponse? {
+        if (url.host != "acid.local") return null
+        val path = url.path ?: return null
+        if (!path.startsWith("/avatar/")) return null
+        val username = Uri.decode(path.removePrefix("/avatar/")).trim()
+        val (file, mime) = ChatRepository.findCachedAvatar(username) ?: return null
+        return WebResourceResponse(
+            mime,
+            null,
+            200,
+            "OK",
+            mapOf("Cache-Control" to "max-age=300"),
+            FileInputStream(file),
         )
     }
 

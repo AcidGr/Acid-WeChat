@@ -5,10 +5,12 @@ import android.app.Dialog
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.widget.FrameLayout
 import com.acid.wechat.core.AcidLogger
@@ -26,6 +28,7 @@ object FloatingSheetDialog {
         bridgeName: String,
         widthRatio: Float = 0.90f,
         heightRatio: Float = 0.68f,
+        requestInterceptor: ((Uri) -> WebResourceResponse?)? = null,
         bridgeFactory: (Dialog, WebView) -> Any,
     ): Dialog? {
         return runCatching {
@@ -50,6 +53,7 @@ object FloatingSheetDialog {
                     dialog.setCanceledOnTouchOutside(true)
                 },
                 bridgeFactory = bridgeFactory,
+                requestInterceptor = requestInterceptor,
                 containerFactory = { webView, dialog ->
                     buildFloatingContainer(activity, webView, dialog, density, cardWidth, cardHeight)
                 },

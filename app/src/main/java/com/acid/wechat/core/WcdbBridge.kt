@@ -169,6 +169,11 @@ object WcdbBridge {
     fun rawQuery(sql: String, selectionArgs: Array<String>? = null): Cursor? =
         rawQueryOn(resolveDbBySuffix(mainDb, "EnMicroMsg.db") { mainDb = it }, sql, selectionArgs)
 
+    fun mainDbPath(): String? {
+        val db = resolveDbBySuffix(mainDb, "EnMicroMsg.db") { mainDb = it } ?: return null
+        return runCatching { db.javaClass.getMethod("getPath").invoke(db) as? String }.getOrNull()
+    }
+
     fun rawQuerySns(sql: String, selectionArgs: Array<String>? = null): Cursor? =
         rawQueryOn(resolveDbBySuffix(snsDb, "SnsMicroMsg.db") { snsDb = it }, sql, selectionArgs)
 
