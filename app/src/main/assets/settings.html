@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>Acid-WeChat</title>
+<style>
+  :root {
+    --bg: #F6F7F9;
+    --surface: #FFFFFF;
+    --text: #111827;
+    --muted: #8E95A2;
+    --line: #ECEEF2;
+    --accent: #07C160;
+    --switch-off: #E2E5EA;
+  }
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "HarmonyOS Sans", "Helvetica Neue", sans-serif;
+    height: 100%;
+    overflow: hidden;
+  }
+  .app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  .topbar {
+    background: var(--surface);
+    padding: 14px 16px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .brand-title {
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    color: var(--text);
+  }
+  .brand-meta {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .close-btn {
+    border: none;
+    background: #F2F3F5;
+    color: #374151;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .close-btn:active {
+    background: #E5E7EB;
+  }
+  .tabs-wrap {
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    padding: 4px 12px 10px;
+    overflow-x: auto;
+    white-space: nowrap;
+    scrollbar-width: none;
+  }
+  .tabs-wrap::-webkit-scrollbar {
+    display: none;
+  }
+  .tabs {
+    display: inline-flex;
+    gap: 6px;
+    min-width: 100%;
+  }
+  .tab {
+    border: none;
+    background: transparent;
+    color: #5C6470;
+    font-size: 14px;
+    font-weight: 500;
+    padding: 7px 13px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background-color 0.16s ease, color 0.16s ease;
+    flex-shrink: 0;
+  }
+  .tab.active {
+    background: #EAF9F0;
+    color: #06A853;
+    font-weight: 600;
+  }
+  .content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .group-card {
+    background: var(--surface);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(17, 24, 39, 0.03);
+    margin-bottom: 12px;
+  }
+  .group-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 15px 16px;
+    cursor: pointer;
+    background: var(--surface);
+  }
+  .group-header:active {
+    background: #FAFAFB;
+  }
+  .group-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .group-arrow {
+    width: 18px;
+    height: 18px;
+    color: var(--muted);
+    transition: transform 0.18s ease;
+    flex-shrink: 0;
+  }
+  .group-card.expanded .group-arrow {
+    transform: rotate(90deg);
+  }
+  .group-body {
+    display: none;
+    border-top: 1px solid var(--line);
+  }
+  .group-card.expanded .group-body {
+    display: block;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 14px 22px;
+    min-height: 52px;
+    background: var(--surface);
+    cursor: pointer;
+    position: relative;
+    transition: opacity 0.16s ease;
+  }
+  .row + .row::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 22px;
+    right: 16px;
+    height: 1px;
+    background: var(--line);
+  }
+  .row:active {
+    background: #FAFAFB;
+  }
+  .row.disabled {
+    opacity: 0.42;
+  }
+  .row.disabled:active {
+    background: var(--surface);
+  }
+  .row-label {
+    font-size: 14.5px;
+    font-weight: 500;
+    color: var(--text);
+    padding-right: 12px;
+    flex-shrink: 0;
+  }
+  .row-text {
+    cursor: default;
+  }
+  .row-text:active {
+    background: var(--surface);
+  }
+  .text-input {
+    width: 56%;
+    max-width: 220px;
+    border: 1px solid #E5E7EB;
+    background: #F8F9FA;
+    color: var(--text);
+    font-size: 13px;
+    padding: 7px 10px;
+    border-radius: 9px;
+    outline: none;
+    font-family: inherit;
+    user-select: text;
+    -webkit-user-select: text;
+    transition: border-color 0.16s ease, background-color 0.16s ease;
+  }
+  .text-input:focus {
+    border-color: var(--accent);
+    background: #FFFFFF;
+  }
+  .text-input:disabled {
+    background: #F3F4F6;
+    color: var(--muted);
+  }
+  .switch {
+    position: relative;
+    width: 46px;
+    height: 26px;
+    border-radius: 999px;
+    background: var(--switch-off);
+    transition: background-color 0.18s ease;
+    flex-shrink: 0;
+  }
+  .switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: #FFFFFF;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+    transition: transform 0.18s ease;
+  }
+  .switch.on {
+    background: var(--accent);
+  }
+  .switch.on::after {
+    transform: translateX(20px);
+  }
+  .empty {
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 44px 16px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .footer-tools {
+    margin-top: 6px;
+    display: flex;
+    gap: 10px;
+  }
+  .tool-btn {
+    flex: 1;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: #374151;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 11px 12px;
+    border-radius: 12px;
+    cursor: pointer;
+  }
+  .tool-btn:active {
+    background: #F3F4F6;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand">
+      <span class="brand-title">Acid-WeChat</span>
+      <span class="brand-meta" id="meta"></span>
+    </div>
+    <button class="close-btn" onclick="closePanel()">关闭</button>
+  </div>
+  <div class="tabs-wrap">
+    <div class="tabs" id="tabs"></div>
+  </div>
+  <div class="content" id="content"></div>
+</div>
+
+<script>
+  let state = {
+    hostVersion: "",
+    dexkitOk: 0,
+    dexkitTotal: 0,
+    categories: [],
+    items: []
+  };
+  let activeCat = "chat";
+  let expandedGroups = {};
+
+  function loadExpanded() {
+    try {
+      const raw = localStorage.getItem("acid_expanded_groups");
+      if (raw) expandedGroups = JSON.parse(raw) || {};
+    } catch (_) {}
+  }
+
+  function saveExpanded() {
+    try {
+      localStorage.setItem("acid_expanded_groups", JSON.stringify(expandedGroups));
+    } catch (_) {}
+  }
+
+  function isGroupExpanded(catId, groupName) {
+    const key = catId + "::" + groupName;
+    if (Object.prototype.hasOwnProperty.call(expandedGroups, key)) {
+      return !!expandedGroups[key];
+    }
+    return true;
+  }
+
+  function toggleGroup(catId, groupName) {
+    const key = catId + "::" + groupName;
+    expandedGroups[key] = !isGroupExpanded(catId, groupName);
+    saveExpanded();
+    renderList();
+  }
+
+  function isItemLocked(item) {
+    if (!item.dependsOn) return false;
+    const parent = state.items.find(i => i.configKey === item.dependsOn);
+    if (!parent) return false;
+    return !parent.enabled || isItemLocked(parent);
+  }
+
+  function loadState() {
+    loadExpanded();
+    try {
+      const raw = window.AcidBridge.getState();
+      state = JSON.parse(raw);
+      const saved = localStorage.getItem("acid_active_cat");
+      if (saved && state.categories.some(c => c.id === saved)) {
+        activeCat = saved;
+      } else if (!state.categories.some(c => c.id === activeCat)) {
+        activeCat = state.categories[0] ? state.categories[0].id : "home";
+      }
+      render();
+    } catch (e) {
+      document.getElementById("content").innerHTML = '<div class="empty">加载失败</div>';
+    }
+  }
+
+  function selectCat(id) {
+    activeCat = id;
+    try { localStorage.setItem("acid_active_cat", id); } catch (_) {}
+    renderTabs();
+    renderList();
+  }
+
+  function render() {
+    document.getElementById("meta").textContent =
+      `${state.hostVersion} · ${state.dexkitOk}/${state.dexkitTotal}`;
+    renderTabs();
+    renderList();
+  }
+
+  function renderTabs() {
+    const el = document.getElementById("tabs");
+    el.innerHTML = state.categories.map(c =>
+      `<button class="tab ${c.id === activeCat ? 'active' : ''}" onclick="selectCat('${c.id}')">${c.label}</button>`
+    ).join("");
+  }
+
+  function renderList() {
+    const el = document.getElementById("content");
+    const list = state.items.filter(i => i.category === activeCat);
+    let html = "";
+    if (list.length === 0) {
+      html += '<div class="empty">暂无功能</div>';
+    } else {
+      const groups = [];
+      const groupMap = {};
+      for (const item of list) {
+        const g = item.group || "通用";
+        if (!groupMap[g]) {
+          groupMap[g] = [];
+          groups.push(g);
+        }
+        groupMap[g].push(item);
+      }
+
+      for (const g of groups) {
+        const expanded = isGroupExpanded(activeCat, g);
+        const itemsHtml = groupMap[g].map(item => {
+          const locked = isItemLocked(item);
+          if (item.type === "text") {
+            const val = item.value != null ? item.value : (item.placeholder || "");
+            return `
+              <div class="row row-text ${locked ? 'disabled' : ''}">
+                <div class="row-label">${escapeHtml(item.title)}</div>
+                <input
+                  class="text-input"
+                  type="text"
+                  value="${escapeHtml(val)}"
+                  placeholder="${escapeHtml(item.placeholder || '')}"
+                  ${locked ? 'disabled' : ''}
+                  oninput="onTextInput(this, '${escapeAttr(item.configKey)}')"
+                  onblur="onTextBlur(this, '${escapeAttr(item.configKey)}')"
+                />
+              </div>
+            `;
+          }
+          const visualOn = !locked && item.enabled;
+          return `
+            <div class="row ${locked ? 'disabled' : ''}" onclick="toggleItem('${escapeAttr(item.configKey)}')">
+              <div class="row-label">${escapeHtml(item.title)}</div>
+              <div class="switch ${visualOn ? 'on' : ''}"></div>
+            </div>
+          `;
+        }).join("");
+
+        html += `
+          <div class="group-card ${expanded ? 'expanded' : ''}">
+            <div class="group-header" onclick="toggleGroup('${activeCat}', '${escapeAttr(g)}')">
+              <span class="group-title">${escapeHtml(g)}</span>
+              <svg class="group-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </div>
+            <div class="group-body">${itemsHtml}</div>
+          </div>
+        `;
+      }
+    }
+
+    if (activeCat === "me") {
+      html += `
+        <div class="footer-tools">
+          <button class="tool-btn" id="btn-rescan" onclick="rescanDexKit()">重扫 DexKit</button>
+          <button class="tool-btn" onclick="copyDiag()">复制诊断</button>
+        </div>
+      `;
+    }
+    el.innerHTML = html;
+  }
+
+  function toggleItem(key) {
+    const item = state.items.find(i => i.configKey === key);
+    if (!item || isItemLocked(item)) return;
+    const next = !item.enabled;
+    item.enabled = next;
+    renderList();
+    try {
+      window.AcidBridge.toggleConfig(key, next);
+    } catch (_) {}
+  }
+
+  function onTextInput(el, key) {
+    const item = state.items.find(i => i.configKey === key);
+    if (item) item.value = el.value;
+    try {
+      window.AcidBridge.setStringConfig(key, el.value);
+    } catch (_) {}
+  }
+
+  function onTextBlur(el, key) {
+    const item = state.items.find(i => i.configKey === key);
+    if (!item) return;
+    if (el.value === "" && item.placeholder) {
+      el.value = item.placeholder;
+      item.value = item.placeholder;
+      try {
+        window.AcidBridge.setStringConfig(key, item.placeholder);
+      } catch (_) {}
+    }
+  }
+
+  function rescanDexKit() {
+    const btn = document.getElementById("btn-rescan");
+    if (btn) btn.textContent = "扫描中...";
+    try {
+      window.AcidBridge.rescanDexKit();
+    } catch (_) {}
+  }
+
+  function onRescanDone(ok, total) {
+    state.dexkitOk = ok;
+    state.dexkitTotal = total;
+    render();
+  }
+
+  function copyDiag() {
+    try { window.AcidBridge.copyDiag(); } catch (_) {}
+  }
+
+  function closePanel() {
+    try { window.AcidBridge.close(); } catch (_) {}
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function escapeAttr(s) {
+    return String(s).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  }
+
+  loadState();
+</script>
+</body>
+</html>
