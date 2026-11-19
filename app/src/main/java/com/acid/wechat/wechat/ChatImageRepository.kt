@@ -111,7 +111,7 @@ object ChatImageRepository {
         val baseCandidates = listOfNotNull(
             HostContext.app.filesDir.parentFile?.let { File(it, "MicroMsg") },
             HostContext.app.getExternalFilesDir(null)?.parentFile?.let { File(it, "MicroMsg") },
-            File("/storage/emulated/0/Android/data/${HostContext.WECHAT_PACKAGE}/MicroMsg"),
+            File("/storage/emulated/0/Android/data/${HostContext.hostPackage}/MicroMsg"),
         )
         for (mmRoot in baseCandidates) {
             if (!mmRoot.isDirectory) continue

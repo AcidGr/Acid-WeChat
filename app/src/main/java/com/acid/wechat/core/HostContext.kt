@@ -11,10 +11,26 @@ object HostContext {
     const val MODULE_VERSION_NAME = "0.2.0"
     const val MODULE_VERSION_CODE = 2
     const val WECHAT_PACKAGE = "com.tencent.mm"
-    const val EXT_DATA_DIR_PATH = "/storage/emulated/0/Android/media/$WECHAT_PACKAGE/AcidWeChat"
-    const val INT_DATA_DIR_FALLBACK = "/data/user/0/$WECHAT_PACKAGE/files/acid_wechat"
+    val SUPPORTED_WECHAT_PACKAGES: Set<String> = setOf("com.tencent.mm", "com.tencent.mn")
 
-    fun candidateDataDirs(): List<File> = listOf(File(EXT_DATA_DIR_PATH), File(INT_DATA_DIR_FALLBACK))
+    @Volatile
+    var hostPackage: String = WECHAT_PACKAGE
+        private set
+
+    fun isSupportedPackage(pkg: String?): Boolean = pkg != null && pkg in SUPPORTED_WECHAT_PACKAGES
+
+    fun setHostPackage(pkg: String) {
+        if (pkg.isNotBlank()) hostPackage = pkg
+    }
+
+    fun extDataDirPath(pkg: String = hostPackage): String =
+        "/storage/emulated/0/Android/media/$pkg/AcidWeChat"
+
+    fun intDataDirFallback(pkg: String = hostPackage): String =
+        "/data/user/0/$pkg/files/acid_wechat"
+
+    fun candidateDataDirs(): List<File> =
+        listOf(File(extDataDirPath()), File(intDataDirFallback()))
 
     @Volatile
     var modulePath: String = ""
@@ -54,11 +70,12 @@ object HostContext {
 
     fun init(application: Application) {
         app = application
+        hostPackage = application.packageName.ifBlank { hostPackage }
         classLoader = application.classLoader
         startedAtMs = System.currentTimeMillis()
         runCatching {
             val pm = application.packageManager
-            val pkgInfo: PackageInfo = pm.getPackageInfo(WECHAT_PACKAGE, 0)
+            val pkgInfo: PackageInfo = pm.getPackageInfo(hostPackage, 0)
             hostVersionName = pkgInfo.versionName ?: "unknown"
             hostVersionCode = pkgInfo.longVersionCode
             hostApkPath = application.applicationInfo.sourceDir ?: ""
@@ -71,7 +88,7 @@ object HostContext {
      * so logs/configs are easy to inspect from chroot, with fallback to internal filesDir.
      */
     fun getDataDir(): File {
-        val extDir = File(EXT_DATA_DIR_PATH)
+        val extDir = File(extDataDirPath())
         if (runCatching {
                 if (!extDir.exists()) extDir.mkdirs()
                 extDir.exists() && extDir.canWrite()

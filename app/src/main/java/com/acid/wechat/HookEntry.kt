@@ -46,12 +46,14 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
     }
 
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
-        if (lpparam.packageName != HostContext.WECHAT_PACKAGE) return
+        val pkg = lpparam.packageName
+        if (!HostContext.isSupportedPackage(pkg)) return
+        HostContext.setHostPackage(pkg)
         val proc = lpparam.processName ?: return
         BlockHotUpdateFeature.installEarlyHooks(lpparam.classLoader, proc)
-        val isMain = proc == HostContext.WECHAT_PACKAGE
-        val isExportProc = proc == "${HostContext.WECHAT_PACKAGE}:tools" ||
-            proc.startsWith("${HostContext.WECHAT_PACKAGE}:appbrand")
+        val isMain = proc == pkg
+        val isExportProc = proc == "$pkg:tools" ||
+            proc.startsWith("$pkg:appbrand")
         if (!isMain && !isExportProc) return
         if (!hookedAppCreate.compareAndSet(false, true)) return
 
@@ -62,7 +64,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
                 object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         val app = param.thisObject as? Application ?: return
-                        if (app.packageName != HostContext.WECHAT_PACKAGE) return
+                        if (!HostContext.isSupportedPackage(app.packageName)) return
                         if (isMain) bootstrap(app) else bootstrapSubprocess(app, proc)
                     }
                 },

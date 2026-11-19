@@ -128,7 +128,7 @@ object DebugServer {
                 put("ok", true)
                 put("moduleVersion", HostContext.MODULE_VERSION_NAME)
                 put("moduleVersionCode", HostContext.MODULE_VERSION_CODE)
-                put("hostPackage", HostContext.WECHAT_PACKAGE)
+                put("hostPackage", HostContext.hostPackage)
                 put("hostVersionName", HostContext.hostVersionName)
                 put("hostVersionCode", HostContext.hostVersionCode)
                 put("classLoader", HostContext.classLoader.javaClass.name)
