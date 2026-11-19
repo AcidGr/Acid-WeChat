@@ -11,6 +11,10 @@ object HostContext {
     const val MODULE_VERSION_NAME = "0.2.0"
     const val MODULE_VERSION_CODE = 2
     const val WECHAT_PACKAGE = "com.tencent.mm"
+    const val EXT_DATA_DIR_PATH = "/storage/emulated/0/Android/media/$WECHAT_PACKAGE/AcidWeChat"
+    const val INT_DATA_DIR_FALLBACK = "/data/user/0/$WECHAT_PACKAGE/files/acid_wechat"
+
+    fun candidateDataDirs(): List<File> = listOf(File(EXT_DATA_DIR_PATH), File(INT_DATA_DIR_FALLBACK))
 
     @Volatile
     var modulePath: String = ""
@@ -67,7 +71,7 @@ object HostContext {
      * so logs/configs are easy to inspect from chroot, with fallback to internal filesDir.
      */
     fun getDataDir(): File {
-        val extDir = File("/storage/emulated/0/Android/media/com.tencent.mm/AcidWeChat")
+        val extDir = File(EXT_DATA_DIR_PATH)
         if (runCatching {
                 if (!extDir.exists()) extDir.mkdirs()
                 extDir.exists() && extDir.canWrite()

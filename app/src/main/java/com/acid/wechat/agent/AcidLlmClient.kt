@@ -97,15 +97,15 @@ object AcidLlmClient {
         val reqBody = JSONObject().apply {
             put("model", cfg.model)
             put("messages", messages)
-            put("tools", toolsSchema)
+            if (toolsSchema.length() > 0) {
+                put("tools", toolsSchema)
+            }
             put("temperature", cfg.temperature)
             put("stream", true)
             put("stream_options", JSONObject().put("include_usage", true))
-            val eff = cfg.reasoningEffort.lowercase()
+            val eff = AgentConfigStore.normalizeReasoningEffort(cfg.reasoningEffort)
             if (eff in setOf("low", "medium", "high")) {
                 put("reasoning_effort", eff)
-            } else if (eff == "max") {
-                put("reasoning_effort", "high")
             }
         }
 

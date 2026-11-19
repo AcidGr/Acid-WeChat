@@ -9,6 +9,7 @@ data class ToolPolicy(
     val currentTalker: String? = null,
     val allowSendMessage: Boolean = isAdmin && (currentTalker == null || currentTalker == AgentSessionModels.GLOBAL_TALKER),
     val allowedImagePaths: Set<String> = emptySet(),
+    val enabledTools: Set<String> = AgentConfigStore.ALL_TOOL_NAMES.toSet(),
 )
 
 data class ImageAttachment(
@@ -22,6 +23,8 @@ data class ImageAttachment(
  */
 interface AgentTool {
     val name: String
+    val title: String
+    val summary: String
     fun buildOpenAiSchema(): JSONObject
     fun buildOpenAiSchema(policy: ToolPolicy): JSONObject = buildOpenAiSchema()
     fun execute(args: JSONObject): ToolResult
@@ -39,21 +42,37 @@ object AgentToolRegistry {
 
     private val tools: Map<String, AgentTool> = linkedMapOf(
         WeChatAgentTool.name to WeChatAgentTool,
+        ReadImageTool.name to ReadImageTool,
         SandboxFileTools.ReadTool.name to SandboxFileTools.ReadTool,
         SandboxFileTools.WriteTool.name to SandboxFileTools.WriteTool,
         SandboxFileTools.EditTool.name to SandboxFileTools.EditTool,
         SandboxFileTools.BashTool.name to SandboxFileTools.BashTool,
-        ReadImageTool.name to ReadImageTool,
     )
+
+    fun allToolNames(): List<String> = tools.keys.toList()
+
+    fun catalogJson(): JSONArray = JSONArray().apply {
+        for (t in tools.values) {
+            put(JSONObject().apply {
+                put("name", t.name)
+                put("title", t.title)
+                put("desc", t.summary)
+            })
+        }
+    }
 
     fun buildToolsSchema(policy: ToolPolicy = ToolPolicy()): JSONArray = JSONArray().apply {
         for (tool in tools.values) {
+            if (tool.name !in policy.enabledTools) continue
             if (!policy.isAdmin && tool.name == SandboxFileTools.BashTool.name) continue
             put(tool.buildOpenAiSchema(policy))
         }
     }
 
     fun execute(name: String, args: JSONObject, policy: ToolPolicy = ToolPolicy()): ToolResult {
+        if (name !in policy.enabledTools) {
+            return ToolResult("Error: Tool '$name' is disabled in AI settings.", true)
+        }
         if (!policy.isAdmin && name == SandboxFileTools.BashTool.name) {
             return ToolResult("Error: Tool 'bash' is disabled in guest sandbox mode.", true)
         }

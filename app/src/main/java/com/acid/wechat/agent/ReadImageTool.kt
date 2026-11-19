@@ -17,6 +17,8 @@ import java.io.File
  */
 object ReadImageTool : AgentTool {
     override val name = "readimage"
+    override val title = "视觉识图 (readimage)"
+    override val summary = "读取微信聊天图片或工作区图片内容"
     private const val MAX_DIMENSION_PX = 1024
     private const val MAX_FILE_BYTES = 25L * 1024L * 1024L
     private const val JPEG_QUALITY = 82

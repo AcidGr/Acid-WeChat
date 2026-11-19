@@ -23,6 +23,8 @@ object SandboxFileTools {
 
     object ReadTool : AgentTool {
         override val name = "read"
+        override val title = "读取文件 (read)"
+        override val summary = "读取工作区文本文件、config.json 与运行日志"
         override fun buildOpenAiSchema(): JSONObject = makeTool(
             name = name,
             description = "Read a UTF-8 text file in the agent workspace (or config.json / config.schema.json / acid.log) with line numbers.",
@@ -67,6 +69,8 @@ object SandboxFileTools {
 
     object WriteTool : AgentTool {
         override val name = "write"
+        override val title = "写入文件 (write)"
+        override val summary = "在工作区创建或覆盖文件及更新配置"
         override fun buildOpenAiSchema(): JSONObject = makeTool(
             name = name,
             description = "Create or overwrite a UTF-8 text file inside workspace/ (or update config.json / agent/models.json).",
@@ -93,6 +97,8 @@ object SandboxFileTools {
 
     object EditTool : AgentTool {
         override val name = "edit"
+        override val title = "编辑文件 (edit)"
+        override val summary = "对工作区文件或配置文件进行精确文本替换"
         override fun buildOpenAiSchema(): JSONObject = makeTool(
             name = name,
             description = "Replace exact literal text in an existing UTF-8 file inside workspace/ or config.json.",
@@ -140,6 +146,8 @@ object SandboxFileTools {
 
     object BashTool : AgentTool {
         override val name = "bash"
+        override val title = "终端命令 (bash)"
+        override val summary = "在工作区沙盒目录内执行 Shell 命令（仅机主权限）"
         override fun buildOpenAiSchema(): JSONObject = makeTool(
             name = name,
             description = "Execute a `/system/bin/sh -c` command with working directory inside the dedicated Agent workspace (`AcidWeChat/workspace/`). Returns combined stdout/stderr and exit code.",
@@ -220,7 +228,7 @@ object SandboxFileTools {
         if (scope == AgentConfigStore.PathScope.CONFIG_JSON) {
             ConfigStore.reloadIfModified(force = true)
         } else if (scope == AgentConfigStore.PathScope.MODELS_JSON) {
-            AgentConfigStore.getConfig()
+            AgentConfigStore.getConfig(forceReload = true)
         }
         return ToolResult("Successfully $verb ${file.absolutePath}")
     }

@@ -89,14 +89,7 @@ object AgentDialog {
                 put("totalCount", page.totalCount)
                 put("hasMore", page.hasMore)
                 put("items", page.itemsJsonArray())
-                put("config", JSONObject().apply {
-                    put("baseUrl", cfg.baseUrl)
-                    put("apiKey", cfg.apiKey)
-                    put("model", cfg.model)
-                    put("hasApiKey", cfg.hasApiKey)
-                    put("workspace", AgentConfigStore.workspaceDir().absolutePath)
-                    put("modelsFile", AgentConfigStore.modelsFile().absolutePath)
-                })
+                put("config", AgentConfigStore.toUiJson(cfg))
             }.toString()
         }
 
@@ -155,12 +148,7 @@ object AgentDialog {
         @JavascriptInterface
         fun saveModelConfig(baseUrl: String, apiKey: String, model: String): String {
             val saved = AgentConfigStore.updateConfig(baseUrl, apiKey, model)
-            return JSONObject().apply {
-                put("baseUrl", saved.baseUrl)
-                put("apiKey", saved.apiKey)
-                put("model", saved.model)
-                put("hasApiKey", saved.hasApiKey)
-            }.toString()
+            return AgentConfigStore.toUiJson(saved).toString()
         }
 
         @JavascriptInterface

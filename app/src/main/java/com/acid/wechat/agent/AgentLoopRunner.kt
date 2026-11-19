@@ -31,7 +31,12 @@ internal object AgentLoopRunner {
         val isAdmin = mode != InvocationMode.CHAT_TRIGGER_GUEST
         val (baseTitle, baseMemSummary, baseTimeline) = AgentSessionStore.snapshotForPrompt(talker)
         val allowedImages = if (isAdmin) emptySet() else collectTimelineImagePaths(baseTimeline)
-        val policy = ToolPolicy(isAdmin = isAdmin, currentTalker = talker, allowedImagePaths = allowedImages)
+        val policy = ToolPolicy(
+            isAdmin = isAdmin,
+            currentTalker = talker,
+            allowedImagePaths = allowedImages,
+            enabledTools = cfg.enabledTools,
+        )
         val toolsSchema = AgentToolRegistry.buildToolsSchema(policy)
         val inFlightToolMsgs = mutableListOf<JSONObject>()
         var finalReplyText = ""
@@ -49,6 +54,7 @@ internal object AgentLoopRunner {
                     memorySummary = baseMemSummary,
                     timeline = baseTimeline,
                     inFlightToolMessages = inFlightToolMsgs,
+                    cfg = cfg,
                 )
 
                 var thinkItem: TimelineItem? = null

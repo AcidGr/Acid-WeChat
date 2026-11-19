@@ -97,20 +97,31 @@ object SettingsDialog {
                 appendOptionItem(items, spec.category.id, FeatureOption.from(spec))
             }
 
+            AgentConfigStore.ensureInitialized()
             return JSONObject().apply {
-                val agentCfg = AgentConfigStore.getConfig()
                 put("hostVersion", HostContext.hostVersionName)
                 put("dexkitOk", dk.optInt("okCount", 0))
                 put("dexkitTotal", dk.optInt("total", 0))
                 put("categories", cats)
                 put("items", items)
-                put("agent", JSONObject().apply {
-                    put("model", agentCfg.model)
-                    put("hasApiKey", agentCfg.hasApiKey)
-                    put("workspace", AgentConfigStore.workspaceDir().absolutePath)
-                    put("modelsFile", AgentConfigStore.modelsFile().absolutePath)
-                })
+                put("agent", AgentConfigStore.toUiJson(AgentConfigStore.getConfig(forceReload = true)))
             }.toString()
+        }
+
+        @JavascriptInterface
+        fun updateAgentConfig(patchJson: String): String {
+            return runCatching {
+                val patch = JSONObject(patchJson)
+                val updated = AgentConfigStore.updateFromPatch(patch)
+                AcidLogger.i(
+                    TAG,
+                    "UI updated agent config: model=${updated.model}, effort=${updated.reasoningEffort}, tools=${updated.enabledTools.size}",
+                )
+                AgentConfigStore.toUiJson(updated).toString()
+            }.getOrElse { err ->
+                AcidLogger.w(TAG, "updateAgentConfig failed", err)
+                AgentConfigStore.toUiJson().toString()
+            }
         }
 
         @JavascriptInterface

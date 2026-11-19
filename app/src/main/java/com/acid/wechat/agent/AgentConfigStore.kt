@@ -4,6 +4,7 @@ import com.acid.wechat.core.AcidIo
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.core.ConfigStore
 import com.acid.wechat.core.HostContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
@@ -21,6 +22,22 @@ object AgentConfigStore {
     const val DEFAULT_TEMP = 0.2
     const val DEFAULT_MAX_STEPS = 40
 
+    val ALL_TOOL_NAMES: List<String> get() = AgentToolRegistry.allToolNames()
+    val VALID_REASONING_EFFORTS: Set<String> = setOf("default", "low", "medium", "high")
+
+    val DEFAULT_PANEL_SYSTEM_PROMPT: String = """
+你是「Acid Agent」，运行在机主（master）手机微信内的本机 AI 助手。
+请结合当前会话上下文与已开启工具，用简体中文清晰、准确地回答机主的问题。
+    """.trimIndent()
+
+    val DEFAULT_AUTO_REPLY_SYSTEM_PROMPT: String = """
+你的后台角色是机主的助手「酸小BOT」，物理上与机主共用同一个微信号。
+1. 发送出口强约定：你没有发消息工具，你这次回复的最终文本输出本身就会直接作为这条微信消息发到当前聊天中；严禁输出“我已帮你发过去了”“好的这就回他”“已发送给对方”等元话语，请直接说出要发给当前聊天的那句正文。
+2. 自然融入：平时以机主视角或贴近机主口吻简要回应，不要主动自称机器人或 AI；只有在对方明确质疑“你是不是机器人 / 不是本人吧”时，才坦诚你是机主的助手，并说明机主本人稍后会看消息。
+3. 严守物理边界：绝对禁止编造机主此刻的物理位置、行程或正在做什么（不知道的事绝不瞎编）；若被问到行踪、线下见/约时间、借钱/借物、或需要机主拍板的承诺/决定，统一用自然短句推脱或转告“这会儿走不开 / 晚点本人联系你”。
+4. 回复格式强约束（微信实发文本）：必须像真人发微信一样简短克制，一般只回复 1～2 句；严禁使用任何 Markdown（禁止 **、#、代码块、表格、引用 >、有序/无序列表）以及 emoji 表情，也不要带 @ai 前缀。
+    """.trimIndent()
+
     data class ModelConfig(
         val baseUrl: String = DEFAULT_BASE_URL,
         val apiKey: String = "",
@@ -28,8 +45,30 @@ object AgentConfigStore {
         val temperature: Double = DEFAULT_TEMP,
         val maxSteps: Int = DEFAULT_MAX_STEPS,
         val reasoningEffort: String = "default",
+        val panelSystemPrompt: String = DEFAULT_PANEL_SYSTEM_PROMPT,
+        val autoReplySystemPrompt: String = DEFAULT_AUTO_REPLY_SYSTEM_PROMPT,
+        val enabledTools: Set<String> = ALL_TOOL_NAMES.toSet(),
     ) {
         val hasApiKey: Boolean get() = apiKey.isNotBlank() || isLoopbackBaseUrl(baseUrl)
+    }
+
+    fun normalizeReasoningEffort(raw: String): String {
+        val norm = raw.trim().lowercase()
+        val mapped = if (norm == "max") "high" else norm
+        return if (mapped in VALID_REASONING_EFFORTS) mapped else "default"
+    }
+
+    private fun canonicalTools(rawSet: Set<String>): Set<String> =
+        ALL_TOOL_NAMES.filterTo(LinkedHashSet()) { it in rawSet }
+
+    private fun parseEnabledTools(arr: JSONArray?): Set<String> {
+        if (arr == null) return ALL_TOOL_NAMES.toSet()
+        val picked = HashSet<String>(arr.length())
+        for (i in 0 until arr.length()) {
+            val name = arr.optString(i, "").trim()
+            if (name.isNotEmpty()) picked += name
+        }
+        return canonicalTools(picked)
     }
 
     private fun isLoopbackBaseUrl(url: String): Boolean {
@@ -94,7 +133,7 @@ object AgentConfigStore {
         }
     }
 
-    fun getConfig(): ModelConfig {
+    fun getConfig(forceReload: Boolean = false): ModelConfig {
         val f = modelsFile()
         if (!f.exists() || f.length() == 0L) {
             ensureInitialized()
@@ -102,24 +141,78 @@ object AgentConfigStore {
         }
         val m = f.lastModified()
         val len = f.length()
-        if (m != lastMtime || len != lastLen) {
+        if (forceReload || m != lastMtime || len != lastLen) {
             synchronized(lock) { reloadFromDiskLocked(f) }
         }
         return cached
     }
 
-    fun updateConfig(baseUrl: String, apiKey: String, model: String): ModelConfig {
+    fun updateConfig(baseUrl: String, apiKey: String, model: String): ModelConfig =
+        updateFromPatch(
+            JSONObject()
+                .put("baseUrl", baseUrl)
+                .put("apiKey", apiKey)
+                .put("model", model),
+        )
+
+    fun updateFromPatch(patch: JSONObject): ModelConfig {
         synchronized(lock) {
             val f = modelsFile()
             if (f.exists() && f.length() > 0L) reloadFromDiskLocked(f)
-            val next = cached.copy(
-                baseUrl = baseUrl.trim().ifEmpty { DEFAULT_BASE_URL },
-                apiKey = apiKey.trim(),
-                model = model.trim().ifEmpty { DEFAULT_MODEL },
-            )
+            var next = cached
+            if (patch.has("baseUrl")) {
+                next = next.copy(baseUrl = patch.optString("baseUrl").trim().ifEmpty { DEFAULT_BASE_URL })
+            }
+            if (patch.has("apiKey")) {
+                next = next.copy(apiKey = patch.optString("apiKey").trim())
+            }
+            if (patch.has("model")) {
+                next = next.copy(model = patch.optString("model").trim().ifEmpty { DEFAULT_MODEL })
+            }
+            if (patch.has("reasoningEffort")) {
+                next = next.copy(reasoningEffort = normalizeReasoningEffort(patch.optString("reasoningEffort", "default")))
+            }
+            if (patch.has("panelSystemPrompt")) {
+                next = next.copy(
+                    panelSystemPrompt = patch.optString("panelSystemPrompt", "").trim().ifEmpty { DEFAULT_PANEL_SYSTEM_PROMPT },
+                )
+            }
+            if (patch.has("autoReplySystemPrompt")) {
+                next = next.copy(
+                    autoReplySystemPrompt = patch.optString("autoReplySystemPrompt", "").trim().ifEmpty { DEFAULT_AUTO_REPLY_SYSTEM_PROMPT },
+                )
+            }
+            patch.optJSONArray("enabledTools")?.let { arr ->
+                next = next.copy(enabledTools = parseEnabledTools(arr))
+            }
+            if (patch.has("toggleTool")) {
+                val tool = patch.optString("toggleTool", "").trim()
+                val enabled = patch.optBoolean("enabled", true)
+                if (tool in ALL_TOOL_NAMES) {
+                    val updatedSet = next.enabledTools.toMutableSet()
+                    if (enabled) updatedSet += tool else updatedSet -= tool
+                    next = next.copy(enabledTools = canonicalTools(updatedSet))
+                }
+            }
             saveLocked(next)
             return cached
         }
+    }
+
+    fun toUiJson(cfg: ModelConfig = getConfig()): JSONObject = JSONObject().apply {
+        put("baseUrl", cfg.baseUrl)
+        put("apiKey", cfg.apiKey)
+        put("model", cfg.model)
+        put("hasApiKey", cfg.hasApiKey)
+        put("reasoningEffort", cfg.reasoningEffort)
+        put("panelSystemPrompt", cfg.panelSystemPrompt.ifBlank { DEFAULT_PANEL_SYSTEM_PROMPT })
+        put("defaultPanelSystemPrompt", DEFAULT_PANEL_SYSTEM_PROMPT)
+        put("autoReplySystemPrompt", cfg.autoReplySystemPrompt.ifBlank { DEFAULT_AUTO_REPLY_SYSTEM_PROMPT })
+        put("defaultAutoReplySystemPrompt", DEFAULT_AUTO_REPLY_SYSTEM_PROMPT)
+        put("enabledTools", JSONArray(ALL_TOOL_NAMES.filter { it in cfg.enabledTools }))
+        put("toolCatalog", AgentToolRegistry.catalogJson())
+        put("workspace", workspaceDir().absolutePath)
+        put("modelsFile", modelsFile().absolutePath)
     }
 
     fun resolvePath(rawPath: String, forWrite: Boolean, guestTalker: String? = null): PathResolution {
@@ -181,13 +274,21 @@ object AgentConfigStore {
         runCatching {
             val raw = f.readText(Charsets.UTF_8)
             val obj = JSONObject(raw)
+            val tools = if (obj.has("enabled_tools") && !obj.isNull("enabled_tools")) {
+                parseEnabledTools(obj.optJSONArray("enabled_tools"))
+            } else {
+                ALL_TOOL_NAMES.toSet()
+            }
             cached = ModelConfig(
                 baseUrl = obj.optString("base_url", DEFAULT_BASE_URL).trim().ifEmpty { DEFAULT_BASE_URL },
                 apiKey = obj.optString("api_key", "").trim(),
                 model = obj.optString("model", DEFAULT_MODEL).trim().ifEmpty { DEFAULT_MODEL },
                 temperature = obj.optDouble("temperature", DEFAULT_TEMP).coerceIn(0.0, 2.0),
                 maxSteps = obj.optInt("max_steps", DEFAULT_MAX_STEPS).coerceIn(1, 200),
-                reasoningEffort = obj.optString("reasoning_effort", "default").trim().ifEmpty { "default" },
+                reasoningEffort = normalizeReasoningEffort(obj.optString("reasoning_effort", "default")),
+                panelSystemPrompt = obj.optString("panel_system_prompt", DEFAULT_PANEL_SYSTEM_PROMPT).trim().ifEmpty { DEFAULT_PANEL_SYSTEM_PROMPT },
+                autoReplySystemPrompt = obj.optString("auto_reply_system_prompt", DEFAULT_AUTO_REPLY_SYSTEM_PROMPT).trim().ifEmpty { DEFAULT_AUTO_REPLY_SYSTEM_PROMPT },
+                enabledTools = tools,
             )
             lastMtime = f.lastModified()
             lastLen = f.length()
@@ -205,6 +306,9 @@ object AgentConfigStore {
                 put("temperature", cfg.temperature)
                 put("max_steps", cfg.maxSteps)
                 put("reasoning_effort", cfg.reasoningEffort)
+                put("panel_system_prompt", cfg.panelSystemPrompt)
+                put("auto_reply_system_prompt", cfg.autoReplySystemPrompt)
+                put("enabled_tools", JSONArray(ALL_TOOL_NAMES.filter { it in cfg.enabledTools }))
             }
             val f = modelsFile()
             AcidIo.writeAtomicUtf8(f, obj.toString(2))

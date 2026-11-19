@@ -13,6 +13,7 @@ import com.acid.wechat.debug.DebugServer
 import com.acid.wechat.features.AntiMomentsPostFeature
 import com.acid.wechat.features.AntiRecallFeature
 import com.acid.wechat.features.AutoVoiceTransFeature
+import com.acid.wechat.features.BlockHotUpdateFeature
 import com.acid.wechat.features.ChatAgentFeature
 import com.acid.wechat.features.CustomGameEmojiFeature
 import com.acid.wechat.features.FakeSnsCommentFeature
@@ -47,6 +48,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
     override fun handleLoadPackage(lpparam: XC_LoadPackage.LoadPackageParam) {
         if (lpparam.packageName != HostContext.WECHAT_PACKAGE) return
         val proc = lpparam.processName ?: return
+        BlockHotUpdateFeature.installEarlyHooks(lpparam.classLoader, proc)
         val isMain = proc == HostContext.WECHAT_PACKAGE
         val isExportProc = proc == "${HostContext.WECHAT_PACKAGE}:tools" ||
             proc.startsWith("${HostContext.WECHAT_PACKAGE}:appbrand")
@@ -116,6 +118,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             FeatureRegistry.register(FakeSnsCommentFeature)
             FeatureRegistry.register(SnsTailFeature)
             FeatureRegistry.register(SavePathFeature)
+            FeatureRegistry.register(BlockHotUpdateFeature)
             FeatureRegistry.registerAllDexRules()
 
             // Resolve DexKit (instant on cache hit; scans once per WeChat version/Tinker change)

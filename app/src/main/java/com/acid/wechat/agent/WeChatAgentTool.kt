@@ -25,6 +25,8 @@ import org.json.JSONObject
  */
 object WeChatAgentTool : AgentTool {
     override val name = "wechat"
+    override val title = "微信综合工具 (wechat)"
+    override val summary = "查状态、搜联系人、读消息、全局发消息、伪赞评与改配置"
 
     private val actions = listOf(
         "status",

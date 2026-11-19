@@ -102,6 +102,21 @@ object ConfigStore {
     }
 
     fun getBoolean(spec: ConfigSchema.BoolSpec): Boolean = getBoolean(spec.key, spec.defaultValue)
+
+    fun getBooleanEarlySafe(spec: ConfigSchema.BoolSpec): Boolean {
+        if (HostContext.isInitialized) return getBoolean(spec)
+        for (dir in HostContext.candidateDataDirs()) {
+            val f = File(dir, FILE_NAME)
+            if (!f.isFile || !f.canRead() || f.length() == 0L) continue
+            val parsed = runCatching {
+                val obj = JSONObject(f.readText(Charsets.UTF_8))
+                if (obj.has(spec.key)) spec.resolve(obj.opt(spec.key)) else null
+            }.getOrNull()
+            if (parsed != null) return parsed
+        }
+        return spec.defaultValue
+    }
+
     fun getInt(spec: ConfigSchema.IntSpec): Int = getInt(spec.key, spec.defaultValue)
     fun getString(spec: ConfigSchema.StringSpec): String = getString(spec.key, spec.defaultValue)
     fun isEffective(spec: ConfigSchema.BoolSpec): Boolean = isEffective(spec.key, spec.defaultValue, spec.dependsOn)

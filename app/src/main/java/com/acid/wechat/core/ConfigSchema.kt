@@ -225,6 +225,10 @@ object ConfigSchema {
         "图片视频导出目录，如 Pictures/AcidWeChat",
         dependsOn = CUSTOM_SAVE_PATH_ENABLED.key,
     ))
+    val DISABLE_HOT_UPDATE = register(BoolSpec(
+        "disable_hot_update", true, FeatureCategory.ME, "版本保护", "禁止微信热更新",
+        "拦截微信 Tinker 热补丁加载与后台合成并清理补丁目录，防止热更新导致模块失效（重启微信生效）",
+    ))
     val DEBUG_SERVER = register(BoolSpec(
         "debug_server", true, FeatureCategory.ME, "系统调试", "本地调试接口",
         "开启 127.0.0.1 本地调试与配置接口（重启微信生效）", isSystem = true,

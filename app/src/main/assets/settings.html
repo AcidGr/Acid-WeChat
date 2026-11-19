@@ -318,6 +318,115 @@
   .agent-btn:active {
     opacity: 0.9;
   }
+  .row.row-col {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 13px 16px;
+    cursor: default;
+  }
+  .row.row-col:active {
+    background: var(--surface);
+  }
+  .row-col + .row-col::before,
+  .row-col + .row::before,
+  .row + .row-col::before {
+    left: 16px;
+  }
+  .row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .row-main {
+    flex: 1;
+    min-width: 0;
+    padding-right: 12px;
+  }
+  .row-sub {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin-top: 2px;
+    line-height: 1.38;
+  }
+  .input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .field-input, .prompt-textarea {
+    width: 100%;
+    border: 1px solid #E5E7EB;
+    background: #F8F9FA;
+    color: var(--text);
+    font-size: 13px;
+    padding: 9px 11px;
+    border-radius: 10px;
+    outline: none;
+    font-family: inherit;
+    user-select: text;
+    -webkit-user-select: text;
+    transition: border-color 0.16s ease, background-color 0.16s ease;
+  }
+  .field-input:focus, .prompt-textarea:focus {
+    border-color: var(--accent);
+    background: #FFFFFF;
+  }
+  .prompt-textarea {
+    min-height: 96px;
+    resize: vertical;
+    line-height: 1.5;
+  }
+  .prompt-textarea.tall {
+    min-height: 170px;
+  }
+  .inline-btn {
+    border: 1px solid #E5E7EB;
+    background: #F9FAFB;
+    color: #4B5563;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 8px 11px;
+    border-radius: 9px;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .inline-btn.compact {
+    padding: 4px 10px;
+    font-size: 11.5px;
+  }
+  .inline-btn:active {
+    background: #F3F4F6;
+  }
+  .effort-group {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 7px;
+  }
+  .effort-btn {
+    border: 1px solid #E5E7EB;
+    background: #F8F9FA;
+    color: #4B5563;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 8px 6px;
+    border-radius: 9px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s ease;
+  }
+  .effort-btn.active {
+    background: #EAF9F0;
+    color: #06A853;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .helper-text {
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.45;
+  }
 </style>
 </head>
 <body>
@@ -419,28 +528,207 @@
     ).join("");
   }
 
+  function toolCatalogList() {
+    const ag = state.agent || {};
+    return Array.isArray(ag.toolCatalog) ? ag.toolCatalog : [];
+  }
+
+  const EFFORT_OPTIONS = [
+    { value: "default", label: "默认" },
+    { value: "low", label: "低" },
+    { value: "medium", label: "中" },
+    { value: "high", label: "高" }
+  ];
+  let apiKeyVisible = false;
+
+  function renderGroupCard(catId, groupTitle, bodyHtml) {
+    const expanded = isGroupExpanded(catId, groupTitle);
+    return `
+      <div class="group-card ${expanded ? 'expanded' : ''}">
+        <div class="group-header" onclick="toggleGroup('${escapeAttr(catId)}', '${escapeAttr(groupTitle)}')">
+          <span class="group-title">${escapeHtml(groupTitle)}</span>
+          <svg class="group-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </div>
+        <div class="group-body">${bodyHtml}</div>
+      </div>
+    `;
+  }
+
+  function enabledToolList() {
+    const ag = state.agent || {};
+    if (Array.isArray(ag.enabledTools)) return ag.enabledTools;
+    return toolCatalogList().map(t => t.name);
+  }
+
+  function formatToolsSummary(tools) {
+    return tools.length > 0 ? tools.join(" / ") : "未开启任何工具";
+  }
+
+  function isLoopbackUrl(url) {
+    const u = String(url || "").trim().toLowerCase();
+    return u.startsWith("http://127.0.0.1") ||
+      u.startsWith("http://localhost") ||
+      u.startsWith("https://127.0.0.1") ||
+      u.startsWith("https://localhost");
+  }
+
+  function updateAgentBadgeAndSummary() {
+    const ag = state.agent || {};
+    const hasKey = !!(String(ag.apiKey || "").trim() || isLoopbackUrl(ag.baseUrl));
+    ag.hasApiKey = hasKey;
+    const badge = document.getElementById("agent-status-badge");
+    if (badge) {
+      badge.className = "agent-badge " + (hasKey ? "" : "warn");
+      badge.textContent = hasKey ? (String(ag.model || "").trim() || "deepseek-chat") : "待填 Key";
+    }
+    const summary = document.getElementById("agent-tools-summary");
+    if (summary) {
+      summary.textContent = formatToolsSummary(enabledToolList());
+    }
+  }
+
+  function renderHomeAgentPage() {
+    const ag = state.agent || {};
+    const hasKey = !!ag.hasApiKey;
+    const badgeCls = hasKey ? "" : "warn";
+    const badgeText = hasKey ? (ag.model || "已就绪") : "待填 Key";
+    const tools = enabledToolList();
+    const effort = EFFORT_OPTIONS.some(o => o.value === ag.reasoningEffort) ? ag.reasoningEffort : "default";
+
+    let html = `
+      <div class="agent-card">
+        <div class="agent-top">
+          <span class="agent-title">Acid Agent</span>
+          <span class="agent-badge ${badgeCls}" id="agent-status-badge">${escapeHtml(badgeText)}</span>
+        </div>
+        <div class="agent-meta">
+          已开启工具：<span id="agent-tools-summary">${escapeHtml(formatToolsSummary(tools))}</span><br/>
+          工作区：${escapeHtml(ag.workspace || "")}<br/>
+          配置文件：${escapeHtml(ag.modelsFile || "")}
+        </div>
+        <button class="agent-btn" onclick="openAgent()">打开全局 AI 助手</button>
+      </div>
+    `;
+
+    const modelCardBody = `
+      <div class="row row-col">
+        <div class="row-label">接口地址 (URL)</div>
+        <input
+          class="field-input"
+          id="agent-baseurl-input"
+          type="text"
+          value="${escapeHtml(ag.baseUrl != null ? ag.baseUrl : "https://api.deepseek.com/v1")}"
+          placeholder="https://api.deepseek.com/v1"
+          oninput="onAgentFieldInput('baseUrl', this.value)"
+          onblur="onAgentUrlOrModelBlur(this, 'baseUrl', 'https://api.deepseek.com/v1')"
+        />
+      </div>
+      <div class="row row-col">
+        <div class="row-label">API Key</div>
+        <div class="input-wrap">
+          <input
+            class="field-input"
+            id="agent-apikey-input"
+            type="${apiKeyVisible ? "text" : "password"}"
+            value="${escapeHtml(ag.apiKey || "")}"
+            placeholder="sk-..."
+            oninput="onAgentFieldInput('apiKey', this.value)"
+          />
+          <button class="inline-btn" id="agent-apikey-vis-btn" type="button" onclick="toggleApiKeyVis()">${apiKeyVisible ? "隐藏" : "显示"}</button>
+        </div>
+      </div>
+      <div class="row row-col">
+        <div class="row-label">模型名称 (Model)</div>
+        <input
+          class="field-input"
+          id="agent-model-input"
+          type="text"
+          value="${escapeHtml(ag.model != null ? ag.model : "deepseek-chat")}"
+          placeholder="deepseek-chat"
+          oninput="onAgentFieldInput('model', this.value)"
+          onblur="onAgentUrlOrModelBlur(this, 'model', 'deepseek-chat')"
+        />
+      </div>
+      <div class="row row-col">
+        <div class="row-head">
+          <span class="row-label">思考深度</span>
+          <span class="helper-text">reasoning_effort</span>
+        </div>
+        <div class="effort-group" id="agent-effort-group">
+          ${EFFORT_OPTIONS.map(opt => `
+            <button
+              class="effort-btn ${effort === opt.value ? "active" : ""}"
+              type="button"
+              data-effort="${opt.value}"
+              onclick="setReasoningEffort('${opt.value}')"
+            >${opt.label}</button>
+          `).join("")}
+        </div>
+      </div>
+    `;
+    html += renderGroupCard("home", "模型与接口", modelCardBody);
+
+    const panelPrompt = ag.panelSystemPrompt || ag.defaultPanelSystemPrompt || "";
+    const autoReplyPrompt = ag.autoReplySystemPrompt || ag.defaultAutoReplySystemPrompt || "";
+    const promptCardBody = `
+      <div class="row row-col">
+        <div class="row-head">
+          <span class="row-label">面板助手提示词（全局 / 聊天浮窗）</span>
+          <button class="inline-btn compact" type="button" onclick="resetPrompt('panelSystemPrompt', 'defaultPanelSystemPrompt', 'agent-panel-prompt')">恢复默认</button>
+        </div>
+        <textarea
+          class="prompt-textarea"
+          id="agent-panel-prompt"
+          rows="4"
+          placeholder="输入面板助手系统提示词（留空失焦后将自动恢复默认）"
+          oninput="onAgentFieldInput('panelSystemPrompt', this.value)"
+          onblur="onPromptBlur(this, 'panelSystemPrompt', 'defaultPanelSystemPrompt', 'agent-panel-prompt')"
+        >${escapeHtml(panelPrompt)}</textarea>
+        <div class="helper-text">机主在全局 AI 浮窗或单聊/群聊右上角 AI 面板提问时使用。</div>
+      </div>
+      <div class="row row-col">
+        <div class="row-head">
+          <span class="row-label">微信聊天 @ 自动回复提示词</span>
+          <button class="inline-btn compact" type="button" onclick="resetPrompt('autoReplySystemPrompt', 'defaultAutoReplySystemPrompt', 'agent-autoreply-prompt')">恢复默认</button>
+        </div>
+        <textarea
+          class="prompt-textarea tall"
+          id="agent-autoreply-prompt"
+          rows="8"
+          placeholder="输入微信 @ 自动回复系统提示词（留空失焦后将自动恢复默认）"
+          oninput="onAgentFieldInput('autoReplySystemPrompt', this.value)"
+          onblur="onPromptBlur(this, 'autoReplySystemPrompt', 'defaultAutoReplySystemPrompt', 'agent-autoreply-prompt')"
+        >${escapeHtml(autoReplyPrompt)}</textarea>
+        <div class="helper-text">群聊被 @我/@ai 或私聊收到 @ai 自动回微信消息时使用。</div>
+      </div>
+    `;
+    html += renderGroupCard("home", "系统提示词", promptCardBody);
+
+    const toolsCardBody = toolCatalogList().map(tool => {
+      const enabled = tools.includes(tool.name);
+      return `
+        <div class="row" onclick="toggleAgentTool('${escapeAttr(tool.name)}')">
+          <div class="row-main">
+            <div class="row-label">${escapeHtml(tool.title)}</div>
+            <div class="row-sub">${escapeHtml(tool.desc)}</div>
+          </div>
+          <div class="switch ${enabled ? "on" : ""}" id="tool-switch-${escapeAttr(tool.name)}"></div>
+        </div>
+      `;
+    }).join("");
+    html += renderGroupCard("home", "开启的工具", toolsCardBody);
+
+    return html;
+  }
+
   function renderList() {
     const el = document.getElementById("content");
     const list = state.items.filter(i => i.category === activeCat);
     let html = "";
     if (activeCat === "home") {
-      const ag = state.agent || {};
-      const badgeCls = ag.hasApiKey ? "" : "warn";
-      const badgeText = ag.hasApiKey ? (ag.model || "已就绪") : "待填 Key";
-      html += `
-        <div class="agent-card">
-          <div class="agent-top">
-            <span class="agent-title">Acid Agent</span>
-            <span class="agent-badge ${badgeCls}">${escapeHtml(badgeText)}</span>
-          </div>
-          <div class="agent-meta">
-            工具：bash / read / write / edit / wechat<br/>
-            工作区：${escapeHtml(ag.workspace || "")}<br/>
-            模型文件：${escapeHtml(ag.modelsFile || "")}
-          </div>
-          <button class="agent-btn" onclick="openAgent()">打开对话浮窗</button>
-        </div>
-      `;
+      html += renderHomeAgentPage();
     }
     if (list.length === 0 && activeCat !== "home") {
       html += '<div class="empty">暂无功能</div>';
@@ -457,7 +745,6 @@
       }
 
       for (const g of groups) {
-        const expanded = isGroupExpanded(activeCat, g);
         const itemsHtml = groupMap[g].map(item => {
           const locked = isItemLocked(item);
           if (item.type === "text") {
@@ -486,17 +773,7 @@
           `;
         }).join("");
 
-        html += `
-          <div class="group-card ${expanded ? 'expanded' : ''}">
-            <div class="group-header" onclick="toggleGroup('${activeCat}', '${escapeAttr(g)}')">
-              <span class="group-title">${escapeHtml(g)}</span>
-              <svg class="group-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="9 18 15 12 9 6"></polyline>
-              </svg>
-            </div>
-            <div class="group-body">${itemsHtml}</div>
-          </div>
-        `;
+        html += renderGroupCard(activeCat, g, itemsHtml);
       }
     }
 
@@ -510,6 +787,100 @@
     }
     el.innerHTML = html;
   }
+
+  function patchAgentConfig(patch) {
+    try {
+      const raw = window.AcidBridge.updateAgentConfig(JSON.stringify(patch));
+      const updated = JSON.parse(raw);
+      if (!state.agent) state.agent = {};
+      state.agent.hasApiKey = !!updated.hasApiKey;
+      state.agent.enabledTools = updated.enabledTools;
+      state.agent.reasoningEffort = updated.reasoningEffort;
+      if (Array.isArray(updated.toolCatalog)) state.agent.toolCatalog = updated.toolCatalog;
+      updateAgentBadgeAndSummary();
+      return updated;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function onAgentFieldInput(field, value) {
+    if (!state.agent) state.agent = {};
+    state.agent[field] = value;
+    updateAgentBadgeAndSummary();
+    patchAgentConfig({ [field]: value });
+  }
+
+  function onAgentUrlOrModelBlur(el, field, fallback) {
+    const trimmed = el.value.trim();
+    if (!trimmed) {
+      el.value = fallback;
+      onAgentFieldInput(field, fallback);
+    }
+  }
+
+  function toggleApiKeyVis() {
+    apiKeyVisible = !apiKeyVisible;
+    const inp = document.getElementById("agent-apikey-input");
+    const btn = document.getElementById("agent-apikey-vis-btn");
+    if (inp) inp.type = apiKeyVisible ? "text" : "password";
+    if (btn) btn.textContent = apiKeyVisible ? "隐藏" : "显示";
+  }
+
+  function setReasoningEffort(level) {
+    if (!state.agent) state.agent = {};
+    state.agent.reasoningEffort = level;
+    const btns = document.querySelectorAll("#agent-effort-group .effort-btn");
+    btns.forEach(btn => {
+      if (btn.getAttribute("data-effort") === level) btn.classList.add("active");
+      else btn.classList.remove("active");
+    });
+    patchAgentConfig({ reasoningEffort: level });
+  }
+
+  function resetPrompt(field, defField, elId) {
+    const def = (state.agent && state.agent[defField]) || "";
+    const ta = document.getElementById(elId);
+    if (ta) ta.value = def;
+    onAgentFieldInput(field, def);
+  }
+
+  function onPromptBlur(el, field, defField, elId) {
+    if (!el.value.trim()) {
+      resetPrompt(field, defField, elId);
+    }
+  }
+
+  function toggleAgentTool(toolName) {
+    const cur = enabledToolList();
+    const next = !cur.includes(toolName);
+    const updated = patchAgentConfig({ toggleTool: toolName, enabled: next });
+    const latestTools = updated && Array.isArray(updated.enabledTools) ? updated.enabledTools : cur;
+    for (const tool of toolCatalogList()) {
+      const sw = document.getElementById("tool-switch-" + tool.name);
+      if (sw) sw.classList.toggle("on", latestTools.includes(tool.name));
+    }
+    updateAgentBadgeAndSummary();
+  }
+
+  function refreshAgentIfIdle() {
+    const activeEl = document.activeElement;
+    if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
+    try {
+      const fresh = JSON.parse(window.AcidBridge.getState());
+      if (fresh && fresh.agent) {
+        state.agent = fresh.agent;
+        if (activeCat === "home") {
+          renderList();
+        }
+      }
+    } catch (_) {}
+  }
+
+  window.addEventListener("focus", refreshAgentIfIdle);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshAgentIfIdle();
+  });
 
   function toggleItem(key) {
     const item = state.items.find(i => i.configKey === key);
