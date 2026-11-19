@@ -18,6 +18,7 @@ import com.acid.wechat.wechat.ChatImageRepository
 import com.acid.wechat.wechat.ChatQueryRepository
 import com.acid.wechat.wechat.ChatRepository
 import com.acid.wechat.wechat.VoiceTransBridge
+import com.acid.wechat.wechat.WeChatMessageFormatter
 import org.json.JSONObject
 import java.lang.reflect.Field
 import java.util.Collections
@@ -144,15 +145,16 @@ object ChatAgentFeature : AcidFeature {
             }
 
             if (!FeatureRegistry.isEnabled(this)) return
-            if (type != 1 && type != 49) return
+            if (!WeChatMessageFormatter.isTextOrAppMsgType(type)) return
             if (abs(System.currentTimeMillis() - createTimeMs) > LIVE_MSG_WINDOW_MS) return
 
+            val triggerText = WeChatMessageFormatter.extractTriggerText(rawContent, body)
             val shouldTrigger = if (isSend) {
-                containsAtAi(body)
+                containsAtAi(triggerText)
             } else {
                 if (!ConfigStore.isEffective(ConfigSchema.CHAT_AGENT_PASSIVE_AT)) false
-                else if (talker.endsWith("@chatroom")) containsAtAi(body) || isMentioningSelf(msgObj, values)
-                else containsAtAi(body)
+                else if (talker.endsWith("@chatroom")) containsAtAi(triggerText) || isMentioningSelf(msgObj, values)
+                else containsAtAi(triggerText)
             }
             if (!shouldTrigger) return
 

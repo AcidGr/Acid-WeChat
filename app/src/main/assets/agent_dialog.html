@@ -91,6 +91,11 @@
     display: flex; align-items: center; gap: 5px; font-size: 10.5px; color: var(--muted);
     padding: 0 4px;
   }
+  .eye-icon {
+    width: 13px; height: 13px; flex-shrink: 0; display: inline-block; vertical-align: -2px;
+  }
+  .eye-icon.open { color: #059669; }
+  .eye-icon.closed { color: #9CA3AF; opacity: 0.85; }
   .gold-badge {
     font-size: 9.5px; color: #B45309; background: #FEF3C7; border: 1px solid #F59E0B;
     padding: 0 5px; border-radius: 999px; font-weight: 600;
@@ -459,14 +464,14 @@
     }
   }
 
-  function sendBubbleToWeChat(btn, idx) {
+  function sendBubbleToWeChat(btn, itemId, idx) {
     const it = items[idx];
     if (!it || !it.text) return;
     try {
-      const res = JSON.parse(window.AcidAgentBridge.sendToWeChat(it.text));
+      const res = JSON.parse(window.AcidAgentBridge.sendToWeChat(itemId || it.id || "", it.text));
       if (res.ok) {
-        btn.textContent = "已发送 ✓";
-        btn.disabled = true;
+        it.chatVisible = true;
+        renderMessages("preserve");
       } else {
         showToast("发送失败: " + (res.detail || "未知错误"), 3000);
       }
@@ -540,7 +545,7 @@
       if (it.kind === "master") {
         parts.push(`
           <div class="msg-row right">
-            <div class="bubble-meta">${goldTag}<span>master · ${tm}</span></div>
+            <div class="bubble-meta">${goldTag}${renderEyeIcon(!!it.chatVisible)}<span>master · ${tm}</span></div>
             <div class="bubble bubble-master ${compCls}">${formatChatBubbleText(it.text)}</div>
           </div>
         `);
@@ -550,19 +555,19 @@
         const who = esc(it.senderName || "对方");
         parts.push(`
           <div class="msg-row left">
-            <div class="bubble-meta"><span>${who} · ${tm}</span>${goldTag}</div>
+            <div class="bubble-meta">${renderEyeIcon(true)}<span>${who} · ${tm}</span>${goldTag}</div>
             <div class="bubble bubble-peer ${compCls}">${formatChatBubbleText(it.text)}</div>
           </div>
         `);
         return;
       }
       if (it.kind === "agent") {
-        const sendBtnHtml = (!isGlobal && !it.running && it.text && it.text.trim())
-          ? `<button class="mini-send-btn" onclick="sendBubbleToWeChat(this, ${idx})">发到当前聊天</button>`
+        const sendBtnHtml = (!isGlobal && !it.running && !it.chatVisible && it.text && it.text.trim())
+          ? `<button class="mini-send-btn" onclick="sendBubbleToWeChat(this, '${escAttr(it.id)}', ${idx})">发到当前聊天</button>`
           : "";
         parts.push(`
           <div class="msg-row left">
-            <div class="bubble-meta"><span>AI · ${tm}</span>${goldTag}</div>
+            <div class="bubble-meta">${renderEyeIcon(!!it.chatVisible)}<span>AI · ${tm}</span>${goldTag}</div>
             <div class="bubble bubble-agent ${compCls}">${renderMarkdown(it.text)}</div>
             ${sendBtnHtml}
           </div>
@@ -631,6 +636,14 @@
     } else {
       box.scrollTop = box.scrollHeight;
     }
+  }
+
+  function renderEyeIcon(visible) {
+    if (isGlobal) return "";
+    if (visible) {
+      return `<svg class="eye-icon open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="聊天框可见"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>`;
+    }
+    return `<svg class="eye-icon closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="仅面板可见（对方不可见）"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path><line x1="1" y1="1" x2="23" y2="23"></line></svg>`;
   }
 
   function formatChatBubbleText(raw) {

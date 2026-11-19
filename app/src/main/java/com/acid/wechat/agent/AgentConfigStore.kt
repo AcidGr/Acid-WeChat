@@ -21,6 +21,7 @@ object AgentConfigStore {
     const val DEFAULT_MODEL = "deepseek-chat"
     const val DEFAULT_TEMP = 0.2
     const val DEFAULT_MAX_STEPS = 40
+    const val DEFAULT_AUTO_COMPACT_TOKENS = 72_000
 
     val ALL_TOOL_NAMES: List<String> get() = AgentToolRegistry.allToolNames()
     val VALID_REASONING_EFFORTS: Set<String> = setOf("default", "low", "medium", "high")
@@ -44,6 +45,7 @@ object AgentConfigStore {
         val model: String = DEFAULT_MODEL,
         val temperature: Double = DEFAULT_TEMP,
         val maxSteps: Int = DEFAULT_MAX_STEPS,
+        val autoCompactTokens: Int = DEFAULT_AUTO_COMPACT_TOKENS,
         val reasoningEffort: String = "default",
         val panelSystemPrompt: String = DEFAULT_PANEL_SYSTEM_PROMPT,
         val autoReplySystemPrompt: String = DEFAULT_AUTO_REPLY_SYSTEM_PROMPT,
@@ -51,6 +53,9 @@ object AgentConfigStore {
     ) {
         val hasApiKey: Boolean get() = apiKey.isNotBlank() || isLoopbackBaseUrl(baseUrl)
     }
+
+    fun sanitizeAutoCompactTokens(raw: Int): Int =
+        if (raw <= 0) 0 else raw.coerceIn(1_000, 2_000_000)
 
     fun normalizeReasoningEffort(raw: String): String {
         val norm = raw.trim().lowercase()
@@ -182,6 +187,11 @@ object AgentConfigStore {
                     autoReplySystemPrompt = patch.optString("autoReplySystemPrompt", "").trim().ifEmpty { DEFAULT_AUTO_REPLY_SYSTEM_PROMPT },
                 )
             }
+            if (patch.has("autoCompactTokens")) {
+                val parsed = patch.optString("autoCompactTokens", "").trim().toIntOrNull()
+                    ?: patch.optInt("autoCompactTokens", DEFAULT_AUTO_COMPACT_TOKENS)
+                next = next.copy(autoCompactTokens = sanitizeAutoCompactTokens(parsed))
+            }
             patch.optJSONArray("enabledTools")?.let { arr ->
                 next = next.copy(enabledTools = parseEnabledTools(arr))
             }
@@ -205,6 +215,7 @@ object AgentConfigStore {
         put("model", cfg.model)
         put("hasApiKey", cfg.hasApiKey)
         put("reasoningEffort", cfg.reasoningEffort)
+        put("autoCompactTokens", cfg.autoCompactTokens)
         put("panelSystemPrompt", cfg.panelSystemPrompt.ifBlank { DEFAULT_PANEL_SYSTEM_PROMPT })
         put("defaultPanelSystemPrompt", DEFAULT_PANEL_SYSTEM_PROMPT)
         put("autoReplySystemPrompt", cfg.autoReplySystemPrompt.ifBlank { DEFAULT_AUTO_REPLY_SYSTEM_PROMPT })
@@ -285,6 +296,7 @@ object AgentConfigStore {
                 model = obj.optString("model", DEFAULT_MODEL).trim().ifEmpty { DEFAULT_MODEL },
                 temperature = obj.optDouble("temperature", DEFAULT_TEMP).coerceIn(0.0, 2.0),
                 maxSteps = obj.optInt("max_steps", DEFAULT_MAX_STEPS).coerceIn(1, 200),
+                autoCompactTokens = sanitizeAutoCompactTokens(obj.optInt("auto_compact_tokens", DEFAULT_AUTO_COMPACT_TOKENS)),
                 reasoningEffort = normalizeReasoningEffort(obj.optString("reasoning_effort", "default")),
                 panelSystemPrompt = obj.optString("panel_system_prompt", DEFAULT_PANEL_SYSTEM_PROMPT).trim().ifEmpty { DEFAULT_PANEL_SYSTEM_PROMPT },
                 autoReplySystemPrompt = obj.optString("auto_reply_system_prompt", DEFAULT_AUTO_REPLY_SYSTEM_PROMPT).trim().ifEmpty { DEFAULT_AUTO_REPLY_SYSTEM_PROMPT },
@@ -305,6 +317,7 @@ object AgentConfigStore {
                 put("model", cfg.model)
                 put("temperature", cfg.temperature)
                 put("max_steps", cfg.maxSteps)
+                put("auto_compact_tokens", cfg.autoCompactTokens)
                 put("reasoning_effort", cfg.reasoningEffort)
                 put("panel_system_prompt", cfg.panelSystemPrompt)
                 put("auto_reply_system_prompt", cfg.autoReplySystemPrompt)

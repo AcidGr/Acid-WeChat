@@ -14,6 +14,7 @@ import android.view.WindowManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.Toast
+import com.acid.wechat.agent.AcidLlmClient
 import com.acid.wechat.agent.AgentConfigStore
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.core.ConfigSchema
@@ -122,6 +123,26 @@ object SettingsDialog {
                 AcidLogger.w(TAG, "updateAgentConfig failed", err)
                 AgentConfigStore.toUiJson().toString()
             }
+        }
+
+        @JavascriptInterface
+        fun testAgentConnection() {
+            Thread({
+                val cfg = AgentConfigStore.getConfig(forceReload = true)
+                val res = AcidLlmClient.testConnection(cfg)
+                val payload = JSONObject().apply {
+                    put("ok", res.ok)
+                    put("latencyMs", res.latencyMs)
+                    put("model", cfg.model)
+                    put("reply", res.replyPreview)
+                    put("error", res.error)
+                }.toString()
+                activity.runOnUiThread {
+                    runCatching {
+                        webView.evaluateJavascript("window.onAgentTestResult && window.onAgentTestResult($payload)", null)
+                    }
+                }
+            }, "AcidModelTest").apply { isDaemon = true; start() }
         }
 
         @JavascriptInterface

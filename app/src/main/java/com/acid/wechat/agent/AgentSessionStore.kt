@@ -65,6 +65,7 @@ object AgentSessionStore {
                     timestampMs = m.createTimeMs,
                     timeText = formatBubbleTime(m.createTimeMs),
                     text = body,
+                    chatVisible = true,
                     sourceMsgId = m.msgId,
                     sourceMsgSvrId = m.msgSvrId,
                 )
@@ -110,6 +111,7 @@ object AgentSessionStore {
                     timestampMs = timestampMs,
                     timeText = formatBubbleTime(timestampMs),
                     text = body,
+                    chatVisible = true,
                     sourceMsgId = msgId,
                     sourceMsgSvrId = msgSvrId,
                 )
@@ -118,6 +120,20 @@ object AgentSessionStore {
         }
         if (changed) persist(session)
         return session
+    }
+
+    fun markItemChatVisible(talker: String, itemId: String): Boolean {
+        if (itemId.isBlank()) return false
+        val session = sessions[talker] ?: return false
+        val updated = synchronized(session) {
+            val target = session.timeline.find { it.id == itemId } ?: return@synchronized false
+            if (target.chatVisible) false else {
+                target.chatVisible = true
+                true
+            }
+        }
+        if (updated) persist(session)
+        return updated
     }
 
     fun updateVoiceTranscript(talker: String, msgId: Long, transcript: String): Boolean {
@@ -181,6 +197,21 @@ object AgentSessionStore {
             ChatRepository.queryVoiceTranscript(it.sourceMsgId, "")?.trim()?.takeIf { t -> t.isNotEmpty() }?.let { "[语音: $it]" }
         (it.sourceMsgId > 0L || it.sourceMsgSvrId > 0L) && (it.text == "[图片]" || it.text.startsWith("[图片: ")) ->
             ChatImageRepository.resolveMessageImagePath(it.sourceMsgId, it.sourceMsgSvrId, "")?.let { "[图片: $it]" }
+        (it.sourceMsgId > 0L || it.sourceMsgSvrId > 0L) && (it.text.startsWith("[type_") || it.text.contains("<?xml") || it.text.contains("<appmsg")) -> {
+            val row = (if (it.sourceMsgId > 0L) ChatRepository.queryMessageById(it.sourceMsgId) else null)
+                ?: (if (it.sourceMsgSvrId > 0L) ChatRepository.queryMessageBySvrId(it.sourceMsgSvrId) else null)
+            row?.let { r ->
+                ChatQueryRepository.formatMessageBody(
+                    talker = r.getAsString("talker").orEmpty(),
+                    isSend = (r.getAsInteger("isSend") ?: 0) != 0,
+                    type = r.getAsInteger("type") ?: 49,
+                    raw = r.getAsString("content").orEmpty(),
+                    msgId = r.getAsLong("msgId") ?: it.sourceMsgId,
+                    imgPath = r.getAsString("imgPath").orEmpty(),
+                    msgSvrId = r.getAsLong("msgSvrId") ?: it.sourceMsgSvrId,
+                )
+            }
+        }
         else -> null
     }
 
@@ -233,14 +264,16 @@ object AgentSessionStore {
         }
     }
 
-    fun shouldAutoCompact(talker: String): Boolean {
+    fun shouldAutoCompact(
+        talker: String,
+        cfg: AgentConfigStore.ModelConfig = AgentConfigStore.getConfig(),
+    ): Boolean {
+        val threshold = cfg.autoCompactTokens
+        if (threshold <= 0) return false
         val session = sessions[talker] ?: return false
         synchronized(session) {
             val activeTurns = session.timeline.count { !it.compacted && it.isConversationalBubble() }
-            if (session.lastPromptTokens >= AgentMemoryCompactor.AUTO_COMPACT_PROMPT_TOKENS) {
-                return activeTurns > KEEP_RECENT_ON_COMPACT
-            }
-            return activeTurns >= AgentMemoryCompactor.AUTO_COMPACT_UNCOMPACTED_TURNS
+            return session.lastPromptTokens >= threshold && activeTurns > KEEP_RECENT_ON_COMPACT
         }
     }
 

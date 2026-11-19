@@ -179,7 +179,7 @@ object ChatQueryRepository {
                     else -> talker
                 }
                 val sender = if (isSend) "master" else ChatRepository.resolveSenderDisplayName(talker, raw, null)
-                val body = formatMessageBody(talker, isSend, type, raw, msgId, imgPath, msgSvrId)
+                val body = WeChatMessageFormatter.formatMessageBody(talker, isSend, type, raw, msgId, imgPath, msgSvrId)
                 rows += MessageSummary(
                     msgId = msgId,
                     msgSvrId = msgSvrId,
@@ -187,7 +187,7 @@ object ChatQueryRepository {
                     isSend = isSend,
                     senderName = sender,
                     type = type,
-                    typeLabel = msgTypeLabel(type),
+                    typeLabel = WeChatMessageFormatter.msgTypeLabel(type),
                     timeText = formatTime(ts),
                     content = body,
                     createTimeMs = ts,
@@ -200,17 +200,6 @@ object ChatQueryRepository {
         AcidLogger.w(TAG, "queryMessages failed", it)
     }.getOrDefault(emptyList())
 
-    private val titleTagRegex = Regex("<title>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</title>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
-
-    fun stripGroupPrefix(talker: String, isSend: Boolean, raw: String): String {
-        if (!talker.endsWith("@chatroom") || isSend) return raw
-        val idx = raw.indexOf(":\n")
-        return if (idx in 1..64) raw.substring(idx + 2) else raw
-    }
-
-    fun extractAppMsgTitle(stripped: String): String? =
-        titleTagRegex.find(stripped)?.groupValues?.getOrNull(1)?.trim()?.takeIf { it.isNotEmpty() }
-
     fun formatMessageBody(
         talker: String,
         isSend: Boolean,
@@ -219,41 +208,7 @@ object ChatQueryRepository {
         msgId: Long = 0L,
         imgPath: String = "",
         msgSvrId: Long = 0L,
-    ): String {
-        val stripped = stripGroupPrefix(talker, isSend, raw)
-        return when (type) {
-            1 -> stripped.trim()
-            3 -> ChatImageRepository.resolveMessageImagePath(msgId, msgSvrId, imgPath)
-                ?.let { "[图片: $it]" }
-                ?: "[图片]"
-            34 -> {
-                val transcript = if (msgId > 0L || imgPath.isNotEmpty()) {
-                    ChatRepository.queryVoiceTranscript(msgId, imgPath)
-                } else {
-                    null
-                }
-                if (!transcript.isNullOrBlank()) "[语音: ${transcript.trim()}]" else "[语音]"
-            }
-            43 -> "[视频]"
-            47 -> "[动画表情]"
-            49 -> extractAppMsgTitle(stripped) ?: ("[卡片/文件/链接消息] " + stripped.replace('\n', ' ').take(160))
-            10000 -> "[系统提示] " + stripped.trim()
-            else -> "[${msgTypeLabel(type)}] " + stripped.replace('\n', ' ').take(160)
-        }
-    }
-
-    private fun msgTypeLabel(type: Int): String = when (type) {
-        1 -> "text"
-        3 -> "image"
-        34 -> "voice"
-        42 -> "card"
-        43 -> "video"
-        47 -> "emoji"
-        48 -> "location"
-        49 -> "appmsg"
-        10000 -> "system"
-        else -> "type_$type"
-    }
+    ): String = WeChatMessageFormatter.formatMessageBody(talker, isSend, type, raw, msgId, imgPath, msgSvrId)
 
     private fun cleanPreview(raw: String): String =
         raw.replace('\n', ' ').trim().take(120)

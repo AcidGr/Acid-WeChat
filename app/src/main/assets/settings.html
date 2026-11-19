@@ -427,6 +427,44 @@
     color: var(--muted);
     line-height: 1.45;
   }
+  .test-btn {
+    width: 100%;
+    border: 1px solid #D1FAE5;
+    background: #EAF9F0;
+    color: #06A853;
+    font-size: 13.5px;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: opacity 0.15s ease, background-color 0.15s ease;
+  }
+  .test-btn:active {
+    background: #D8F5E5;
+  }
+  .test-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  .test-result {
+    font-size: 12px;
+    line-height: 1.45;
+    padding: 8px 10px;
+    border-radius: 9px;
+    word-break: break-all;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .test-result.ok {
+    background: #ECFDF5;
+    border: 1px solid #A7F3D0;
+    color: #065F46;
+  }
+  .test-result.err {
+    background: #FEF2F2;
+    border: 1px solid #FECACA;
+    color: #991B1B;
+  }
 </style>
 </head>
 <body>
@@ -540,6 +578,8 @@
     { value: "high", label: "高" }
   ];
   let apiKeyVisible = false;
+  let testingConn = false;
+  let lastTestResult = null;
 
   function renderGroupCard(catId, groupTitle, bodyHtml) {
     const expanded = isGroupExpanded(catId, groupTitle);
@@ -666,6 +706,37 @@
             >${opt.label}</button>
           `).join("")}
         </div>
+      </div>
+      <div class="row row-col">
+        <div class="row-head">
+          <span class="row-label">自动压缩阈值 (Tokens)</span>
+          <span class="helper-text">默认 72000（填 0 关闭自动压缩）</span>
+        </div>
+        <input
+          class="field-input"
+          id="agent-compact-tokens-input"
+          type="number"
+          min="0"
+          step="1000"
+          value="${ag.autoCompactTokens != null ? ag.autoCompactTokens : 72000}"
+          placeholder="72000"
+          oninput="onAgentCompactTokensInput(this.value)"
+          onblur="onAgentCompactTokensBlur(this)"
+        />
+      </div>
+      <div class="row row-col">
+        <button
+          class="test-btn"
+          id="agent-test-btn"
+          type="button"
+          ${testingConn ? "disabled" : ""}
+          onclick="testModelConnection()"
+        >${testingConn ? "正在发送测试请求..." : "测试接口连通性"}</button>
+        <div
+          class="test-result ${lastTestResult ? (lastTestResult.ok ? "ok" : "err") : ""}"
+          id="agent-test-result"
+          style="${lastTestResult ? "display:block" : "display:none"}"
+        >${lastTestResult ? escapeHtml(formatTestResultText(lastTestResult)) : ""}</div>
       </div>
     `;
     html += renderGroupCard("home", "模型与接口", modelCardBody);
@@ -796,6 +867,7 @@
       state.agent.hasApiKey = !!updated.hasApiKey;
       state.agent.enabledTools = updated.enabledTools;
       state.agent.reasoningEffort = updated.reasoningEffort;
+      if (typeof updated.autoCompactTokens === "number") state.agent.autoCompactTokens = updated.autoCompactTokens;
       if (Array.isArray(updated.toolCatalog)) state.agent.toolCatalog = updated.toolCatalog;
       updateAgentBadgeAndSummary();
       return updated;
@@ -837,6 +909,70 @@
     });
     patchAgentConfig({ reasoningEffort: level });
   }
+
+  function onAgentCompactTokensInput(val) {
+    const trimmed = String(val || "").trim();
+    if (trimmed === "") return;
+    const num = parseInt(trimmed, 10);
+    if (!isNaN(num)) {
+      if (!state.agent) state.agent = {};
+      state.agent.autoCompactTokens = num;
+      patchAgentConfig({ autoCompactTokens: num });
+    }
+  }
+
+  function onAgentCompactTokensBlur(el) {
+    const num = parseInt(String(el.value || "").trim(), 10);
+    const next = isNaN(num) ? 72000 : num;
+    const updated = patchAgentConfig({ autoCompactTokens: next });
+    const sanitized = updated && typeof updated.autoCompactTokens === "number" ? updated.autoCompactTokens : next;
+    el.value = String(sanitized);
+    if (!state.agent) state.agent = {};
+    state.agent.autoCompactTokens = sanitized;
+  }
+
+  function formatTestResultText(res) {
+    if (!res) return "";
+    if (res.ok) {
+      return `连通成功 (${res.latencyMs || 0}ms · ${res.model || ""})：${res.reply || "OK"}`;
+    }
+    return `测试失败 (${res.latencyMs || 0}ms)：${res.error || "未知错误"}`;
+  }
+
+  function testModelConnection() {
+    if (testingConn) return;
+    testingConn = true;
+    const btn = document.getElementById("agent-test-btn");
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = "正在发送测试请求...";
+    }
+    const resBox = document.getElementById("agent-test-result");
+    if (resBox) {
+      resBox.style.display = "none";
+    }
+    try {
+      window.AcidBridge.testAgentConnection();
+    } catch (e) {
+      window.onAgentTestResult({ ok: false, latencyMs: 0, error: String(e) });
+    }
+  }
+
+  window.onAgentTestResult = function(res) {
+    testingConn = false;
+    lastTestResult = res || { ok: false, latencyMs: 0, error: "无响应" };
+    const btn = document.getElementById("agent-test-btn");
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "测试接口连通性";
+    }
+    const resBox = document.getElementById("agent-test-result");
+    if (resBox) {
+      resBox.className = "test-result " + (lastTestResult.ok ? "ok" : "err");
+      resBox.textContent = formatTestResultText(lastTestResult);
+      resBox.style.display = "block";
+    }
+  };
 
   function resetPrompt(field, defField, elId) {
     const def = (state.agent && state.agent[defField]) || "";

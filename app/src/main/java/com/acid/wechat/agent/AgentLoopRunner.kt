@@ -78,16 +78,19 @@ internal object AgentLoopRunner {
                         },
                         onContentDelta = { full ->
                             thinkItem?.takeIf { it.running }?.let { it.running = false }
-                            finalReplyText = full
+                            val displayFull = AgentContextBuilder.stripVisibilityTag(full)
+                            finalReplyText = displayFull
                             val (item, pushedAt) = upsertStreamItem(
-                                talker, session, replyItem, "agent", full, lastPushMs, notifyTimeline,
+                                talker, session, replyItem, "agent", displayFull, lastPushMs, notifyTimeline,
+                                chatVisible = sendReplyToWeChat,
                             )
                             replyItem = item
                             lastPushMs = pushedAt
                         },
                         onUsage = { pt, _, tt ->
                             synchronized(session) {
-                                if (pt > 0) session.lastPromptTokens = pt
+                                // Only measure step-1 baseline conversation prompt tokens (excluding transient tool/image steps).
+                                if (step == 1 && pt > 0) session.lastPromptTokens = pt
                                 if (tt > 0) session.lastTotalTokens = tt
                             }
                             notifyState(talker)
@@ -97,9 +100,13 @@ internal object AgentLoopRunner {
 
                 thinkItem?.running = false
                 replyItem?.running = false
-                val msgText = assistantMsg.optString("content", "").let { if (it == "null") "" else it }
-                if (msgText.isNotBlank()) finalReplyText = msgText
-                notifyTimeline(talker)
+                val msgText = AgentContextBuilder.stripVisibilityTag(
+                    assistantMsg.optString("content", "").let { if (it == "null") "" else it },
+                )
+                if (msgText.isNotBlank()) {
+                    finalReplyText = msgText
+                    replyItem?.text = msgText
+                }
 
                 val toolCalls = assistantMsg.optJSONArray("tool_calls")
                 if (toolCalls == null || toolCalls.length() == 0) {
@@ -109,15 +116,25 @@ internal object AgentLoopRunner {
                             replyItem!!.text = cleaned
                             AgentSentTracker.markSent(talker, cleaned)
                             val sendRes = WeChatSender.sendText(talker, cleaned)
-                            if (!sendRes.ok) {
+                            if (sendRes.ok) {
+                                replyItem!!.chatVisible = true
+                            } else {
+                                replyItem!!.chatVisible = false
                                 AgentSentTracker.consumeIfSentByAgent(talker, cleaned)
                                 appendError(session, "发送微信回复失败: ${sendRes.detail}")
                             }
+                        } else {
+                            replyItem!!.chatVisible = false
                         }
+                    } else if (sendReplyToWeChat) {
+                        replyItem?.chatVisible = false
                     }
+                    notifyTimeline(talker)
                     break
                 }
 
+                replyItem?.chatVisible = false
+                notifyTimeline(talker)
                 inFlightToolMsgs += assistantMsg
                 executeToolBatch(talker, session, rs, policy, toolCalls, step, gen, inFlightToolMsgs, notifyTimeline)
             }
@@ -136,7 +153,7 @@ internal object AgentLoopRunner {
                 AgentSessionStore.persist(session)
                 notifyTimeline(talker)
                 notifyState(talker)
-                if (AgentSessionStore.shouldAutoCompact(talker)) {
+                if (AgentSessionStore.shouldAutoCompact(talker, cfg)) {
                     runCatching {
                         val cRes = AgentSessionStore.compactSession(talker, cfg)
                         if (cRes.ok) {
@@ -268,6 +285,7 @@ internal object AgentLoopRunner {
         fullText: String,
         lastPushMs: Long,
         notifyTimeline: (String) -> Unit,
+        chatVisible: Boolean = false,
     ): Pair<TimelineItem, Long> {
         if (existing == null) {
             val now = System.currentTimeMillis()
@@ -278,6 +296,7 @@ internal object AgentLoopRunner {
                 timestampMs = now,
                 timeText = formatBubbleTime(now),
                 text = fullText,
+                chatVisible = chatVisible,
                 running = true,
             )
             synchronized(session) { session.timeline += item }

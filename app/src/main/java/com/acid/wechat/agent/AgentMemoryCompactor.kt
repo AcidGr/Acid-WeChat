@@ -10,9 +10,6 @@ import org.json.JSONObject
  * window verbatim, mirroring the Huawei Cloud memory-compaction design locally on-device.
  */
 object AgentMemoryCompactor {
-    const val AUTO_COMPACT_PROMPT_TOKENS = 32_000
-    const val AUTO_COMPACT_UNCOMPACTED_TURNS = 36
-
     data class CompactOutcome(
         val ok: Boolean,
         val summary: String = "",
@@ -38,6 +35,7 @@ object AgentMemoryCompactor {
             append("1. 【时间范围】：概括这批记录发生的时间跨度；\n")
             append("2. 【讨论要点与事实】：提炼对方诉求、关键信息、共识与待办；\n")
             append("3. 【已发生事件与动作】：客观列出发送了什么回复、执行过什么关键查询/工具操作（明确区分 master、对方与 AI）；\n")
+            append("4. 【私密边界】：带有「面板私聊·对方不可见」或「仅面板私聊·未发到聊天框」的记录在摘要中必须保留（面板私密）标记；\n")
             append("禁止空泛套话或杜撰，总字数控制在 380 字以内。\n\n")
             if (priorSummary.isNotBlank()) {
                 append("--- 既有记忆快照（请合并保留关键信息）---\n")
@@ -87,9 +85,15 @@ object AgentMemoryCompactor {
             val t = formatContextTime(it.timestampMs)
             val cleanText = AgentSessionModels.stripAtAiForModel(it.text).ifEmpty { "(呼叫了 AI)" }
             when (it.kind) {
-                "master" -> append("[master ").append(t).append("]: ").append(cleanText).append('\n')
-                "peer" -> append('[').append(it.senderName.ifBlank { "对方" }).append(' ').append(t).append("]: ").append(cleanText).append('\n')
-                "agent" -> append("[agent ").append(t).append("]: ").append(it.text).append('\n')
+                "master" -> {
+                    val vis = if (it.chatVisible) "聊天框" else "面板私聊·对方不可见"
+                    append("[master(").append(vis).append(") ").append(t).append("]: ").append(cleanText).append('\n')
+                }
+                "peer" -> append('[').append(it.senderName.ifBlank { "对方" }).append("(聊天框) ").append(t).append("]: ").append(cleanText).append('\n')
+                "agent" -> {
+                    val vis = if (it.chatVisible) "已发到聊天框" else "仅面板私聊·未发到聊天框"
+                    append("[agent(").append(vis).append(") ").append(t).append("]: ").append(it.text).append('\n')
+                }
                 "tool" -> append("[tool ").append(it.toolName).append(" · ").append(it.toolSummary).append("] -> ")
                     .append(it.toolResult.replace('\n', ' ').take(160)).append('\n')
             }

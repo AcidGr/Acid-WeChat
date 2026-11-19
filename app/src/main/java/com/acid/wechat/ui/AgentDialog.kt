@@ -137,11 +137,11 @@ object AgentDialog {
         }
 
         @JavascriptInterface
-        fun sendToWeChat(text: String): String {
+        fun sendToWeChat(itemId: String, text: String): String {
             if (talker == AgentSessionModels.GLOBAL_TALKER) {
                 return JSONObject().put("ok", false).put("detail", "全局会话未绑定聊天对象").toString()
             }
-            val res = AcidAgentLoop.sendTextToChat(talker, text)
+            val res = AcidAgentLoop.sendTextToChat(talker, text, itemId)
             return JSONObject().put("ok", res.ok).put("detail", res.detail).toString()
         }
 

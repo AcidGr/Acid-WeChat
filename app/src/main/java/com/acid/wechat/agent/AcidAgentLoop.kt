@@ -89,6 +89,7 @@ object AcidAgentLoop {
                 timestampMs = now,
                 timeText = formatBubbleTime(now),
                 text = text,
+                chatVisible = false,
             )
         }
         if (!cfg.hasApiKey) {
@@ -127,12 +128,16 @@ object AcidAgentLoop {
         return outcome
     }
 
-    fun sendTextToChat(talker: String, text: String): WeChatSender.SendResult {
+    fun sendTextToChat(talker: String, text: String, itemId: String? = null): WeChatSender.SendResult {
         val clean = AgentContextBuilder.cleanForWeChat(text)
         if (clean.isEmpty()) return WeChatSender.SendResult(false, "内容为空")
         AgentSentTracker.markSent(talker, clean)
         val res = WeChatSender.sendText(talker, clean)
-        if (!res.ok) AgentSentTracker.consumeIfSentByAgent(talker, clean)
+        if (!res.ok) {
+            AgentSentTracker.consumeIfSentByAgent(talker, clean)
+        } else if (!itemId.isNullOrBlank() && AgentSessionStore.markItemChatVisible(talker, itemId)) {
+            notifyTimeline(talker)
+        }
         return res
     }
 

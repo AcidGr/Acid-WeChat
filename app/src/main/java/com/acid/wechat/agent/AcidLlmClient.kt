@@ -22,6 +22,47 @@ object AcidLlmClient {
         val onUsage: (promptTokens: Int, completionTokens: Int, totalTokens: Int) -> Unit,
     )
 
+    data class TestResult(
+        val ok: Boolean,
+        val latencyMs: Long,
+        val replyPreview: String = "",
+        val error: String = "",
+    )
+
+    fun testConnection(cfg: AgentConfigStore.ModelConfig): TestResult {
+        if (!cfg.hasApiKey) {
+            return TestResult(ok = false, latencyMs = 0L, error = "请先填写 API Key")
+        }
+        val t0 = System.currentTimeMillis()
+        return runCatching {
+            val msgs = JSONArray().apply {
+                put(JSONObject().put("role", "user").put("content", "请仅回复OK"))
+            }
+            val testCfg = cfg.copy(maxSteps = 1)
+            val msg = streamChatCompletion(
+                cfg = testCfg,
+                messages = msgs,
+                toolsSchema = JSONArray(),
+                step = 1,
+                cb = StreamCallbacks(
+                    isCancelled = { false },
+                    onConnectionOpened = {},
+                    onReasoningDelta = {},
+                    onContentDelta = {},
+                    onUsage = { _, _, _ -> },
+                ),
+            ) ?: throw IOException("请求被取消或无响应")
+            val elapsed = System.currentTimeMillis() - t0
+            val content = msg.optString("content", "").let { if (it == "null") "" else it }.trim()
+            val reasoning = msg.optString("reasoning_content", "").let { if (it == "null") "" else it }.trim()
+            val preview = content.ifEmpty { reasoning }.replace('\n', ' ').take(60).ifEmpty { "OK" }
+            TestResult(ok = true, latencyMs = elapsed, replyPreview = preview)
+        }.getOrElse { err ->
+            val elapsed = System.currentTimeMillis() - t0
+            TestResult(ok = false, latencyMs = elapsed, error = err.message ?: err.javaClass.simpleName)
+        }
+    }
+
     private class StreamingToolCall(val index: Int) {
         var id: String = ""
         var type: String = "function"

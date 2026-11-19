@@ -24,6 +24,7 @@ object AgentSessionModels {
         val timeText: String = "",
         var text: String = "",
         var compacted: Boolean = false,
+        var chatVisible: Boolean = false,
         val sourceMsgId: Long = 0L,
         val sourceMsgSvrId: Long = 0L,
         var toolName: String = "",
@@ -43,6 +44,7 @@ object AgentSessionModels {
             put("timeText", timeText)
             put("text", text)
             put("compacted", compacted)
+            put("chatVisible", chatVisible)
             put("sourceMsgId", sourceMsgId)
             put("sourceMsgSvrId", sourceMsgSvrId)
             put("toolName", toolName)
@@ -54,23 +56,34 @@ object AgentSessionModels {
         }
 
         companion object {
-            fun fromJson(obj: JSONObject): TimelineItem = TimelineItem(
-                id = obj.optString("id", ""),
-                kind = obj.optString("kind", "agent"),
-                senderName = obj.optString("senderName", ""),
-                timestampMs = obj.optLong("timestampMs", 0L),
-                timeText = obj.optString("timeText", ""),
-                text = obj.optString("text", ""),
-                compacted = obj.optBoolean("compacted", false),
-                sourceMsgId = obj.optLong("sourceMsgId", 0L),
-                sourceMsgSvrId = obj.optLong("sourceMsgSvrId", 0L),
-                toolName = obj.optString("toolName", ""),
-                toolSummary = obj.optString("toolSummary", ""),
-                toolArgs = obj.optString("toolArgs", ""),
-                toolResult = obj.optString("toolResult", ""),
-                running = false,
-                isError = obj.optBoolean("isError", false),
-            )
+            fun fromJson(obj: JSONObject): TimelineItem {
+                val kind = obj.optString("kind", "agent")
+                val srcId = obj.optLong("sourceMsgId", 0L)
+                val srcSvrId = obj.optLong("sourceMsgSvrId", 0L)
+                val defaultVisible = when (kind) {
+                    "peer" -> true
+                    "master" -> srcId > 0L || srcSvrId > 0L
+                    else -> false
+                }
+                return TimelineItem(
+                    id = obj.optString("id", ""),
+                    kind = kind,
+                    senderName = obj.optString("senderName", ""),
+                    timestampMs = obj.optLong("timestampMs", 0L),
+                    timeText = obj.optString("timeText", ""),
+                    text = obj.optString("text", ""),
+                    compacted = obj.optBoolean("compacted", false),
+                    chatVisible = if (obj.has("chatVisible")) obj.optBoolean("chatVisible", defaultVisible) else defaultVisible,
+                    sourceMsgId = srcId,
+                    sourceMsgSvrId = srcSvrId,
+                    toolName = obj.optString("toolName", ""),
+                    toolSummary = obj.optString("toolSummary", ""),
+                    toolArgs = obj.optString("toolArgs", ""),
+                    toolResult = obj.optString("toolResult", ""),
+                    running = false,
+                    isError = obj.optBoolean("isError", false),
+                )
+            }
         }
     }
 
