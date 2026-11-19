@@ -416,6 +416,14 @@
   .row.row-col:active {
     background: var(--surface);
   }
+  .row.row-col.sub-row {
+    padding: 11px 16px 12px 32px;
+    background: #FAFBFD;
+  }
+  .row.row-col.sub-row:active,
+  .row.row-col.sub-row.disabled:active {
+    background: #FAFBFD;
+  }
   .row-col + .row-col::before,
   .row-col + .row::before,
   .row + .row-col::before {
@@ -461,6 +469,10 @@
     border-color: var(--accent);
     background: #FFFFFF;
   }
+  .field-input:disabled {
+    background: #F3F4F6;
+    color: var(--muted);
+  }
   .prompt-textarea {
     min-height: 96px;
     resize: vertical;
@@ -486,6 +498,10 @@
   }
   .inline-btn:active {
     background: #F3F4F6;
+  }
+  .inline-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .effort-group {
     display: grid;
@@ -564,6 +580,128 @@
     border: 1px solid #FECACA;
     color: #991B1B;
   }
+  .ab-search-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0;
+  }
+  .ab-filter-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .ab-pills, .ab-actions-mini {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .ab-pill {
+    border: 1px solid #E5E7EB;
+    background: #F8F9FA;
+    color: #4B5563;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 5px 10px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .ab-pill.active {
+    background: #EAF9F0;
+    color: #06A853;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  .inline-btn.primary {
+    background: #EAF9F0;
+    border-color: #A7F3D0;
+    color: #06A853;
+    font-weight: 600;
+  }
+  .inline-btn.danger {
+    background: #FEF2F2;
+    border-color: #FECACA;
+    color: #DC2626;
+    font-weight: 600;
+  }
+  .ab-select {
+    max-width: 142px;
+    border: 1px solid #E5E7EB;
+    background: #F8F9FA;
+    color: var(--text);
+    font-size: 12.5px;
+    padding: 6px 8px;
+    border-radius: 9px;
+    outline: none;
+    font-family: inherit;
+    flex-shrink: 0;
+  }
+  .ab-group-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ab-group-count {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .ab-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px 12px 18px;
+    min-height: 50px;
+    background: var(--surface);
+    position: relative;
+  }
+  .ab-row.clickable {
+    cursor: pointer;
+  }
+  .ab-row.clickable:active {
+    background: #FAFAFB;
+  }
+  .ab-row + .ab-row::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 18px;
+    right: 16px;
+    height: 1px;
+    background: var(--line);
+  }
+  .ab-key-tag {
+    font-size: 11px;
+    color: #9CA3AF;
+    font-family: monospace;
+    margin-top: 2px;
+    word-break: break-all;
+  }
+  .ab-custom-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 16px 14px;
+  }
+  .ab-custom-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .ab-custom-msg {
+    font-size: 12px;
+    color: #06A853;
+    min-height: 16px;
+  }
+  .ab-custom-msg.err {
+    color: #DC2626;
+  }
+  .confirm-ok.danger {
+    background: #DC2626;
+  }
 </style>
 </head>
 <body>
@@ -588,6 +726,17 @@
     <div class="confirm-actions">
       <button class="confirm-cancel" type="button" onclick="closeWsConfirm()">取消</button>
       <button class="confirm-ok" type="button" onclick="runCleanWorkspace()">确认清理</button>
+    </div>
+  </div>
+</div>
+
+<div class="confirm-mask" id="abResetConfirmMask" onclick="onAbResetMaskClick(event)">
+  <div class="confirm-card">
+    <div class="confirm-title">恢复默认灰度配置？</div>
+    <div class="confirm-desc">将删除本账号本地 Expt 缓存并清除已修改的 Repairer 项，随后重启微信恢复官方默认。</div>
+    <div class="confirm-actions">
+      <button class="confirm-cancel" type="button" onclick="closeAbResetConfirm()">取消</button>
+      <button class="confirm-ok danger" type="button" onclick="runAbTestReset()">恢复并重启</button>
     </div>
   </div>
 </div>
@@ -649,6 +798,7 @@
       } else if (!state.categories.some(c => c.id === activeCat)) {
         activeCat = state.categories[0] ? state.categories[0].id : "home";
       }
+      if (activeCat === "abtest") ensureAbTestLoaded(true);
       render();
     } catch (e) {
       document.getElementById("content").innerHTML = '<div class="empty">加载失败</div>';
@@ -658,6 +808,7 @@
   function selectCat(id) {
     activeCat = id;
     try { localStorage.setItem("acid_active_cat", id); } catch (_) {}
+    if (id === "abtest") ensureAbTestLoaded(true);
     renderTabs();
     renderList();
   }
@@ -690,6 +841,429 @@
   const secretVisState = {};
   let testingConn = false;
   let lastTestResult = null;
+  let abState = null;
+  let abSearch = "";
+  let abFilter = "all";
+  let abShowIncompatible = false;
+  let abExpandedGroups = {};
+  let abCustomExpanded = false;
+  let abCustomType = "expt";
+  let abCustomKey = "";
+  let abCustomVal = "1";
+  let abCustomMsg = "";
+  let abCustomIsErr = false;
+  let abStatusMsg = "";
+  let abStatusIsErr = false;
+
+  function ensureAbTestLoaded(forceReload) {
+    if (abState && !forceReload) return;
+    try {
+      abState = JSON.parse(window.AcidBridge.getAbTestState(!!abShowIncompatible));
+    } catch (e) {
+      abState = { ok: false, error: "加载灰度配置失败", totalCount: 0, activeCount: 0, hiddenIncompatibleCount: 0, groups: [] };
+    }
+  }
+
+  function recomputeAbCounts() {
+    if (!abState || !Array.isArray(abState.groups)) return;
+    let total = 0;
+    let active = 0;
+    for (const g of abState.groups) {
+      for (const c of (g.configs || [])) {
+        total++;
+        if (c.active) active++;
+      }
+    }
+    abState.totalCount = total;
+    abState.activeCount = active;
+    const badge = document.getElementById("ab-active-badge");
+    if (badge) badge.textContent = `${active}/${total} 已开`;
+  }
+
+  function renderAbTestPage() {
+    const ab = abState || { totalCount: 0, activeCount: 0, hiddenIncompatibleCount: 0, groups: [], error: "" };
+    const hidden = ab.hiddenIncompatibleCount || 0;
+    const warnHtml = ab.error
+      ? `<div class="helper-text" style="color:#B45309;margin-top:6px;">${escapeHtml(ab.error)}</div>`
+      : "";
+    const statusHtml = abStatusMsg
+      ? `<div class="helper-text" id="ab-status-note" style="margin-top:6px;color:${abStatusIsErr ? '#DC2626' : '#06A853'};">${escapeHtml(abStatusMsg)}</div>`
+      : `<div class="helper-text" id="ab-status-note" style="margin-top:6px;display:none;"></div>`;
+
+    const customCardHtml = `
+      <div class="group-card ${abCustomExpanded ? 'expanded' : ''}" id="ab-custom-card">
+        <div class="group-header" onclick="toggleAbCustomCard()">
+          <span class="group-title">自定义 Key 读写</span>
+          <svg class="group-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </div>
+        <div class="group-body">
+          <div class="ab-custom-grid">
+            <div class="ab-custom-top">
+              <select id="ab-custom-type" class="ab-select" onchange="abCustomType=this.value">
+                <option value="expt" ${abCustomType === 'expt' ? 'selected' : ''}>expt</option>
+                <option value="repairer" ${abCustomType === 'repairer' ? 'selected' : ''}>repairer</option>
+              </select>
+              <input id="ab-custom-key" class="field-input" type="text" value="${escapeHtml(abCustomKey)}" placeholder="clicfg_..." oninput="abCustomKey=this.value" />
+            </div>
+            <div class="ab-custom-top">
+              <input id="ab-custom-val" class="field-input" type="text" value="${escapeHtml(abCustomVal)}" placeholder="1" oninput="abCustomVal=this.value" />
+              <button class="inline-btn" type="button" onclick="queryCustomAbKey()">查询</button>
+              <button class="inline-btn primary" type="button" onclick="writeCustomAbKey()">写入</button>
+            </div>
+            <div id="ab-custom-msg" class="ab-custom-msg ${abCustomIsErr ? 'err' : ''}">${escapeHtml(abCustomMsg)}</div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    return `
+      <div class="agent-card">
+        <div class="agent-top">
+          <span class="agent-title">微信灰度实验 (ABTest)</span>
+          <span class="agent-badge" id="ab-active-badge">${ab.activeCount || 0}/${ab.totalCount || 0} 已开</span>
+        </div>
+        <div class="agent-meta" style="margin-bottom:0;">读写本地 Expt / Repairer 配置，重启微信生效</div>
+        ${warnHtml}
+        ${statusHtml}
+        <div class="ab-search-wrap">
+          <input
+            id="ab-search-input"
+            class="field-input"
+            type="text"
+            value="${escapeHtml(abSearch)}"
+            placeholder="搜索功能名或 key..."
+            oninput="onAbSearchInput(this.value)"
+          />
+          <button class="inline-btn" type="button" onclick="clearAbSearch()">清除</button>
+        </div>
+        <div class="ab-filter-row">
+          <div class="ab-pills">
+            <button id="ab-pill-all" class="ab-pill ${abFilter === 'all' ? 'active' : ''}" type="button" onclick="setAbFilter('all')">全部</button>
+            <button id="ab-pill-active" class="ab-pill ${abFilter === 'active' ? 'active' : ''}" type="button" onclick="setAbFilter('active')">已开启</button>
+            <button id="ab-pill-incompat" class="ab-pill ${abShowIncompatible ? 'active' : ''}" type="button" onclick="toggleAbIncompatible()">含旧版${hidden > 0 && !abShowIncompatible ? ' (' + hidden + ')' : ''}</button>
+          </div>
+          <div class="ab-actions-mini">
+            <button class="inline-btn primary" type="button" onclick="restartWeChatHost()">重启微信</button>
+            <button class="inline-btn danger" type="button" onclick="openAbResetConfirm()">恢复默认</button>
+          </div>
+        </div>
+      </div>
+      ${customCardHtml}
+      <div id="ab-groups-wrap">${renderAbTestGroupsHtml()}</div>
+    `;
+  }
+
+  function renderAbTestGroupsHtml() {
+    if (!abState || !Array.isArray(abState.groups) || abState.groups.length === 0) {
+      return '<div class="empty">暂无可用灰度项</div>';
+    }
+    const q = abSearch.trim().toLowerCase();
+    const autoExpand = q.length > 0 || abFilter === "active";
+    const cards = [];
+
+    abState.groups.forEach((g, gIdx) => {
+      const configs = g.configs || [];
+      const matched = [];
+      let activeInGroup = 0;
+
+      configs.forEach((cfg, cIdx) => {
+        if (cfg.active) activeInGroup++;
+        if (abFilter === "active" && !cfg.active) return;
+        if (q) {
+          const hit = (cfg.title || "").toLowerCase().includes(q) ||
+            (cfg.key || "").toLowerCase().includes(q) ||
+            (cfg.desc || "").toLowerCase().includes(q) ||
+            (g.group || "").toLowerCase().includes(q);
+          if (!hit) return;
+        }
+        matched.push({ cfg, cIdx });
+      });
+
+      if (matched.length === 0) return;
+
+      const expanded = autoExpand || !!abExpandedGroups[g.group];
+      const countText = activeInGroup > 0 ? `${activeInGroup}/${matched.length}` : String(matched.length);
+      const rowsHtml = matched.map(({ cfg, cIdx }) => {
+        const cleanDesc = (cfg.desc || "").trim();
+        const showDesc = cleanDesc && cleanDesc !== cfg.title && cleanDesc !== g.group && !g.group.startsWith(cleanDesc);
+        const incompatTag = cfg.compatible === false ? ' · 旧版' : '';
+        const metaLine = `${cfg.type === 'repairer' ? 'repairer' : 'expt'} · ${cfg.key}${incompatTag}`;
+
+        let ctrlHtml = "";
+        let rowCls = "ab-row";
+        let rowOnClick = "";
+        if (cfg.uiType === "switch") {
+          rowCls += " clickable";
+          rowOnClick = `onclick="toggleAbTestSwitch(${gIdx}, ${cIdx})"`;
+          ctrlHtml = `<div class="switch ${cfg.active ? 'on' : ''}" id="ab-sw-${gIdx}-${cIdx}"></div>`;
+        } else if (cfg.uiType === "single_choice") {
+          const opts = Array.isArray(cfg.options) ? cfg.options : [];
+          const curStr = (cfg.currentValue !== null && cfg.currentValue !== undefined) ? String(cfg.currentValue) : "";
+          const hasCur = opts.some(o => o.value === curStr);
+          let optsHtml = !hasCur
+            ? `<option value="" selected disabled>${curStr ? escapeHtml("当前:" + curStr) : "默认"}</option>`
+            : "";
+          optsHtml += opts.map(o =>
+            `<option value="${escapeAttr(o.value)}" ${curStr === o.value ? 'selected' : ''}>${escapeHtml(o.alias)}</option>`
+          ).join("");
+          ctrlHtml = `<select class="ab-select" id="ab-sel-${gIdx}-${cIdx}" onchange="onAbTestSelect(${gIdx}, ${cIdx}, this.value)">${optsHtml}</select>`;
+        } else {
+          const curVal = (cfg.currentValue !== null && cfg.currentValue !== undefined) ? String(cfg.currentValue) : "";
+          ctrlHtml = `<input class="text-input" style="width:42%;max-width:160px;" type="text" value="${escapeHtml(curVal)}" placeholder="${escapeHtml(cfg.onValue || '')}" onchange="onAbTestInput(${gIdx}, ${cIdx}, this.value)" />`;
+        }
+
+        return `
+          <div class="${rowCls}" ${rowOnClick}>
+            <div class="row-main">
+              <div class="row-label" style="padding-right:0;">${escapeHtml(cfg.title)}</div>
+              ${showDesc ? `<div class="row-sub">${escapeHtml(cleanDesc)}</div>` : ""}
+              <div class="ab-key-tag">${escapeHtml(metaLine)}</div>
+            </div>
+            ${ctrlHtml}
+          </div>
+        `;
+      }).join("");
+
+      cards.push(`
+        <div class="group-card ${expanded ? 'expanded' : ''}">
+          <div class="group-header" onclick="toggleAbGroup('${escapeAttr(g.group)}')">
+            <span class="group-title">${escapeHtml(g.group)}</span>
+            <div class="ab-group-right">
+              <span class="ab-group-count" id="ab-gcount-${gIdx}">${escapeHtml(countText)}</span>
+              <svg class="group-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            </div>
+          </div>
+          <div class="group-body">${rowsHtml}</div>
+        </div>
+      `);
+    });
+
+    if (cards.length === 0) {
+      return '<div class="empty">没有匹配的灰度配置</div>';
+    }
+    return cards.join("");
+  }
+
+  function showAbStatus(msg, isErr) {
+    abStatusMsg = msg || "";
+    abStatusIsErr = !!isErr;
+    const el = document.getElementById("ab-status-note");
+    if (!el) return;
+    if (!abStatusMsg) {
+      el.style.display = "none";
+      el.textContent = "";
+    } else {
+      el.style.display = "block";
+      el.style.color = abStatusIsErr ? "#DC2626" : "#06A853";
+      el.textContent = abStatusMsg;
+    }
+  }
+
+  function onAbSearchInput(val) {
+    abSearch = val;
+    const wrap = document.getElementById("ab-groups-wrap");
+    if (wrap) wrap.innerHTML = renderAbTestGroupsHtml();
+  }
+
+  function clearAbSearch() {
+    abSearch = "";
+    const inp = document.getElementById("ab-search-input");
+    if (inp) inp.value = "";
+    const wrap = document.getElementById("ab-groups-wrap");
+    if (wrap) wrap.innerHTML = renderAbTestGroupsHtml();
+  }
+
+  function setAbFilter(next) {
+    abFilter = next;
+    const pAll = document.getElementById("ab-pill-all");
+    const pAct = document.getElementById("ab-pill-active");
+    if (pAll) pAll.classList.toggle("active", next === "all");
+    if (pAct) pAct.classList.toggle("active", next === "active");
+    const wrap = document.getElementById("ab-groups-wrap");
+    if (wrap) wrap.innerHTML = renderAbTestGroupsHtml();
+  }
+
+  function toggleAbIncompatible() {
+    abShowIncompatible = !abShowIncompatible;
+    ensureAbTestLoaded(true);
+    renderList();
+  }
+
+  function toggleAbGroup(groupName) {
+    if (abSearch.trim() || abFilter === "active") return;
+    abExpandedGroups[groupName] = !abExpandedGroups[groupName];
+    const wrap = document.getElementById("ab-groups-wrap");
+    if (wrap) wrap.innerHTML = renderAbTestGroupsHtml();
+  }
+
+  function toggleAbCustomCard() {
+    abCustomExpanded = !abCustomExpanded;
+    const card = document.getElementById("ab-custom-card");
+    if (card) card.classList.toggle("expanded", abCustomExpanded);
+  }
+
+  function updateAbGroupCount(gIdx) {
+    if (!abState || !abState.groups || !abState.groups[gIdx]) return;
+    const configs = abState.groups[gIdx].configs || [];
+    const activeCnt = configs.filter(c => c.active).length;
+    const el = document.getElementById("ab-gcount-" + gIdx);
+    if (el && abFilter !== "active" && !abSearch.trim()) {
+      el.textContent = activeCnt > 0 ? `${activeCnt}/${configs.length}` : String(configs.length);
+    }
+  }
+
+  function computeAbItemActive(cfg, val) {
+    if (cfg.uiType === "switch") return val === cfg.onValue;
+    if (cfg.uiType === "single_choice") return val !== null && val !== undefined && val !== "" && val !== "0";
+    return val !== null && val !== undefined && val !== "";
+  }
+
+  function writeAbConfig(gIdx, cIdx, nextVal) {
+    if (!abState || !abState.groups || !abState.groups[gIdx]) return null;
+    const cfg = abState.groups[gIdx].configs && abState.groups[gIdx].configs[cIdx];
+    if (!cfg) return null;
+    try {
+      const res = JSON.parse(window.AcidBridge.setAbTestValue(cfg.type, cfg.key, nextVal));
+      if (!res.ok) {
+        showAbStatus(res.error || "写入失败", true);
+        return null;
+      }
+      cfg.currentValue = nextVal;
+      cfg.active = computeAbItemActive(cfg, nextVal);
+      recomputeAbCounts();
+      updateAbGroupCount(gIdx);
+      showAbStatus(`已更新「${cfg.title}」，重启微信后生效`, false);
+      return cfg;
+    } catch (e) {
+      showAbStatus("写入异常: " + String(e), true);
+      return null;
+    }
+  }
+
+  function toggleAbTestSwitch(gIdx, cIdx) {
+    const cfg = abState && abState.groups && abState.groups[gIdx] && abState.groups[gIdx].configs[cIdx];
+    if (!cfg) return;
+    const nextVal = cfg.active ? cfg.offValue : cfg.onValue;
+    const updated = writeAbConfig(gIdx, cIdx, nextVal);
+    if (updated) {
+      const sw = document.getElementById(`ab-sw-${gIdx}-${cIdx}`);
+      if (sw) sw.classList.toggle("on", updated.active);
+    }
+  }
+
+  function onAbTestSelect(gIdx, cIdx, val) {
+    if (val === "") return;
+    const prev = abState && abState.groups && abState.groups[gIdx] && abState.groups[gIdx].configs[cIdx]
+      ? abState.groups[gIdx].configs[cIdx].currentValue
+      : "";
+    const updated = writeAbConfig(gIdx, cIdx, val);
+    if (!updated) {
+      const sel = document.getElementById(`ab-sel-${gIdx}-${cIdx}`);
+      if (sel) sel.value = prev || "";
+    }
+  }
+
+  function onAbTestInput(gIdx, cIdx, val) {
+    writeAbConfig(gIdx, cIdx, val);
+  }
+
+  function setAbCustomStatus(msg, isErr) {
+    abCustomMsg = msg || "";
+    abCustomIsErr = !!isErr;
+    const el = document.getElementById("ab-custom-msg");
+    if (el) {
+      el.className = "ab-custom-msg " + (abCustomIsErr ? "err" : "");
+      el.textContent = abCustomMsg;
+    }
+  }
+
+  function queryCustomAbKey() {
+    const key = String(abCustomKey || "").trim();
+    if (!key) {
+      setAbCustomStatus("请输入 Key", true);
+      return;
+    }
+    try {
+      const res = JSON.parse(window.AcidBridge.queryAbTestKey(abCustomType, key));
+      if (!res.ok) {
+        setAbCustomStatus(res.error || "查询失败", true);
+        return;
+      }
+      if (!res.exists) {
+        setAbCustomStatus(`当前未设置 [${res.type}] ${res.key}`, false);
+      } else {
+        const val = res.value == null ? "" : String(res.value);
+        abCustomVal = val;
+        const valInp = document.getElementById("ab-custom-val");
+        if (valInp) valInp.value = val;
+        setAbCustomStatus(`当前值: "${val}"`, false);
+      }
+    } catch (e) {
+      setAbCustomStatus("查询异常: " + String(e), true);
+    }
+  }
+
+  function writeCustomAbKey() {
+    const key = String(abCustomKey || "").trim();
+    if (!key) {
+      setAbCustomStatus("请输入 Key", true);
+      return;
+    }
+    try {
+      const res = JSON.parse(window.AcidBridge.setAbTestValue(abCustomType, key, abCustomVal));
+      if (!res.ok) {
+        setAbCustomStatus(res.error || "写入失败", true);
+        return;
+      }
+      setAbCustomStatus(`已写入 ${res.type} [${res.key}] = "${res.value}"`, false);
+      ensureAbTestLoaded(true);
+      const wrap = document.getElementById("ab-groups-wrap");
+      if (wrap) wrap.innerHTML = renderAbTestGroupsHtml();
+      recomputeAbCounts();
+    } catch (e) {
+      setAbCustomStatus("写入异常: " + String(e), true);
+    }
+  }
+
+  function openAbResetConfirm() {
+    const mask = document.getElementById("abResetConfirmMask");
+    if (mask) mask.classList.add("open");
+  }
+
+  function closeAbResetConfirm() {
+    const mask = document.getElementById("abResetConfirmMask");
+    if (mask) mask.classList.remove("open");
+  }
+
+  function onAbResetMaskClick(ev) {
+    if (ev.target && ev.target.id === "abResetConfirmMask") closeAbResetConfirm();
+  }
+
+  function runAbTestReset() {
+    closeAbResetConfirm();
+    try {
+      const res = JSON.parse(window.AcidBridge.resetAbTest());
+      if (res.ok) {
+        window.AcidBridge.restartHost();
+      } else {
+        showAbStatus(res.message || "恢复默认失败", true);
+      }
+    } catch (e) {
+      showAbStatus("恢复默认异常: " + String(e), true);
+    }
+  }
+
+  function restartWeChatHost() {
+    try {
+      window.AcidBridge.restartHost();
+    } catch (e) {
+      showAbStatus("重启失败: " + String(e), true);
+    }
+  }
 
   function renderSecretFieldRow(label, inputId, btnId, field, value, placeholder) {
     const shown = !!secretVisState[inputId];
@@ -871,6 +1445,46 @@
     `;
     html += renderGroupCard("home", "模型与接口", modelCardBody);
 
+    const wakeOnGroupAt = ag.wakeOnGroupAt !== false;
+    const wakeWordEnabled = ag.wakeWordEnabled !== false;
+    const wakeWord = ag.wakeWord != null ? ag.wakeWord : (ag.defaultWakeWord || "@ai");
+    const defaultWakeWord = ag.defaultWakeWord || "@ai";
+    const wakeCardBody = `
+      <div class="row" id="wake-group-at-row" onclick="toggleWakeOnGroupAt()">
+        <div class="row-main">
+          <div class="row-label">群聊中 @ 唤醒</div>
+          <div class="row-sub">群聊中被他人 @我 时自动触发回复</div>
+        </div>
+        <div class="switch ${wakeOnGroupAt ? "on" : ""}" id="wake-group-at-switch"></div>
+      </div>
+      <div class="row" id="wake-word-row" onclick="toggleWakeWordEnabled()">
+        <div class="row-main">
+          <div class="row-label">唤醒词唤醒</div>
+          <div class="row-sub">私聊或群聊消息包含唤醒词时自动触发回复</div>
+        </div>
+        <div class="switch ${wakeWordEnabled ? "on" : ""}" id="wake-word-switch"></div>
+      </div>
+      <div class="row row-col sub-row ${wakeWordEnabled ? "" : "disabled"}" id="wake-word-input-row">
+        <div class="row-head">
+          <span class="row-label">唤醒词</span>
+          <button class="inline-btn compact" id="wake-word-reset-btn" type="button" ${wakeWordEnabled ? "" : "disabled"} onclick="resetWakeWord()">恢复默认</button>
+        </div>
+        <input
+          class="field-input"
+          id="agent-wake-word-input"
+          type="text"
+          maxlength="64"
+          value="${escapeHtml(wakeWord)}"
+          placeholder="${escapeHtml(defaultWakeWord)}"
+          ${wakeWordEnabled ? "" : "disabled"}
+          oninput="onWakeWordInput(this.value)"
+          onblur="onWakeWordBlur(this)"
+        />
+        <div class="helper-text">默认为 ${escapeHtml(defaultWakeWord)}，收到消息后系统会自动屏蔽唤醒词再交给模型。</div>
+      </div>
+    `;
+    html += renderGroupCard("home", "唤醒方式", wakeCardBody);
+
     const toolEndpointsBody = `
       <div class="row row-col">
         <span class="sub-section-tag">联网搜索 (websearch)</span>
@@ -959,18 +1573,18 @@
       </div>
       <div class="row row-col">
         <div class="row-head">
-          <span class="row-label">微信聊天 @ 自动回复提示词</span>
+          <span class="row-label">微信聊天唤醒自动回复提示词</span>
           <button class="inline-btn compact" type="button" onclick="resetPrompt('autoReplySystemPrompt', 'defaultAutoReplySystemPrompt', 'agent-autoreply-prompt')">恢复默认</button>
         </div>
         <textarea
           class="prompt-textarea tall"
           id="agent-autoreply-prompt"
           rows="8"
-          placeholder="输入微信 @ 自动回复系统提示词（留空失焦后将自动恢复默认）"
+          placeholder="输入微信聊天唤醒自动回复系统提示词（留空失焦后将自动恢复默认）"
           oninput="onAgentFieldInput('autoReplySystemPrompt', this.value)"
           onblur="onPromptBlur(this, 'autoReplySystemPrompt', 'defaultAutoReplySystemPrompt', 'agent-autoreply-prompt')"
         >${escapeHtml(autoReplyPrompt)}</textarea>
-        <div class="helper-text">被 @ 自动回复微信消息时使用。</div>
+        <div class="helper-text">通过群聊 @ 或唤醒词自动回复微信消息时使用。</div>
       </div>
     `;
     html += renderGroupCard("home", "系统提示词", promptCardBody);
@@ -993,7 +1607,7 @@
           <div class="row sub-row ${enabled ? "" : "disabled"}" id="tool-guest-draw-row" onclick="toggleGuestDrawImage()">
             <div class="row-main">
               <div class="row-label">允许他人使用画图</div>
-              <div class="row-sub">关闭时仅机主可用，他人 @ai 不可生图</div>
+              <div class="row-sub">关闭时仅机主可用，他人唤醒不可生图</div>
             </div>
             <div class="switch ${enabled && ag.allowGuestDrawImage ? "on" : ""}" id="tool-guest-draw-switch"></div>
           </div>
@@ -1008,6 +1622,11 @@
 
   function renderList() {
     const el = document.getElementById("content");
+    if (activeCat === "abtest") {
+      ensureAbTestLoaded(false);
+      el.innerHTML = renderAbTestPage();
+      return;
+    }
     const list = state.items.filter(i => i.category === activeCat);
     let html = "";
     if (activeCat === "home") {
@@ -1099,14 +1718,86 @@
       state.agent.enabledTools = updated.enabledTools;
       state.agent.reasoningEffort = updated.reasoningEffort;
       if (typeof updated.allowGuestDrawImage === "boolean") state.agent.allowGuestDrawImage = updated.allowGuestDrawImage;
+      if (typeof updated.wakeOnGroupAt === "boolean") state.agent.wakeOnGroupAt = updated.wakeOnGroupAt;
+      if (typeof updated.wakeWordEnabled === "boolean") state.agent.wakeWordEnabled = updated.wakeWordEnabled;
+      if (typeof updated.wakeWord === "string") state.agent.wakeWord = updated.wakeWord;
+      if (typeof updated.defaultWakeWord === "string") state.agent.defaultWakeWord = updated.defaultWakeWord;
       if (typeof updated.autoCompactTokens === "number") state.agent.autoCompactTokens = updated.autoCompactTokens;
       if (Array.isArray(updated.toolCatalog)) state.agent.toolCatalog = updated.toolCatalog;
       updateAgentBadgeAndSummary();
+      syncWakeRows();
       syncAgentToolRows();
       return updated;
     } catch (_) {
       return null;
     }
+  }
+
+  function syncWakeRows() {
+    const ag = state.agent || {};
+    const groupAtOn = ag.wakeOnGroupAt !== false;
+    const wakeWordOn = ag.wakeWordEnabled !== false;
+    const groupSw = document.getElementById("wake-group-at-switch");
+    if (groupSw) groupSw.classList.toggle("on", groupAtOn);
+    const wakeSw = document.getElementById("wake-word-switch");
+    if (wakeSw) wakeSw.classList.toggle("on", wakeWordOn);
+    const wakeInputRow = document.getElementById("wake-word-input-row");
+    if (wakeInputRow) wakeInputRow.classList.toggle("disabled", !wakeWordOn);
+    const inp = document.getElementById("agent-wake-word-input");
+    if (inp) {
+      inp.disabled = !wakeWordOn;
+      if (document.activeElement !== inp && typeof ag.wakeWord === "string") {
+        inp.value = ag.wakeWord;
+      }
+    }
+    const resetBtn = document.getElementById("wake-word-reset-btn");
+    if (resetBtn) resetBtn.disabled = !wakeWordOn;
+  }
+
+  function toggleWakeOnGroupAt() {
+    const cur = !(state.agent && state.agent.wakeOnGroupAt === false);
+    if (!state.agent) state.agent = {};
+    state.agent.wakeOnGroupAt = !cur;
+    syncWakeRows();
+    patchAgentConfig({ wakeOnGroupAt: !cur });
+  }
+
+  function toggleWakeWordEnabled() {
+    const cur = !(state.agent && state.agent.wakeWordEnabled === false);
+    if (!state.agent) state.agent = {};
+    state.agent.wakeWordEnabled = !cur;
+    syncWakeRows();
+    patchAgentConfig({ wakeWordEnabled: !cur });
+  }
+
+  function onWakeWordInput(value) {
+    if (!state.agent) state.agent = {};
+    state.agent.wakeWord = value;
+    const trimmed = String(value || "").trim();
+    if (trimmed) {
+      patchAgentConfig({ wakeWord: trimmed });
+    }
+  }
+
+  function onWakeWordBlur(el) {
+    const def = (state.agent && state.agent.defaultWakeWord) || "@ai";
+    const trimmed = String(el.value || "").trim();
+    const next = trimmed || def;
+    const updated = patchAgentConfig({ wakeWord: next });
+    const sanitized = updated && typeof updated.wakeWord === "string" ? updated.wakeWord : next;
+    el.value = sanitized;
+    if (!state.agent) state.agent = {};
+    state.agent.wakeWord = sanitized;
+  }
+
+  function resetWakeWord() {
+    if (state.agent && state.agent.wakeWordEnabled === false) return;
+    const def = (state.agent && state.agent.defaultWakeWord) || "@ai";
+    const inp = document.getElementById("agent-wake-word-input");
+    if (inp) inp.value = def;
+    if (!state.agent) state.agent = {};
+    state.agent.wakeWord = def;
+    patchAgentConfig({ wakeWord: def });
   }
 
   function onAgentFieldInput(field, value) {

@@ -6,6 +6,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Shared timeline, compaction, pagination, and AI-sent deduplication models for per-chat Agent sessions.
@@ -62,7 +63,7 @@ object AgentSessionModels {
                 val srcSvrId = obj.optLong("sourceMsgSvrId", 0L)
                 val defaultVisible = when (kind) {
                     "peer" -> true
-                    "master" -> srcId > 0L || srcSvrId > 0L
+                    "master", "agent" -> srcId > 0L || srcSvrId > 0L
                     else -> false
                 }
                 return TimelineItem(
@@ -112,25 +113,144 @@ object AgentSessionModels {
         return SimpleDateFormat("MM月dd日 HH:mm", Locale.getDefault()).format(Date(target))
     }
 
-    private val atAiTagRegex = Regex("(?<![a-zA-Z0-9_])@ai(?![a-zA-Z])", RegexOption.IGNORE_CASE)
+    private val wakeRegexLock = Any()
+    @Volatile private var cachedWakeToken: String = ""
+    @Volatile private var cachedWakeRegex: Regex? = null
+    @Volatile private var cachedLeadingWakeRegex: Regex? = null
+    private val multiSpaceRegex = Regex("[ \\t\\u2005\\u00A0]{2,}")
+    private val lineSpaceRegex = Regex("[ \\t\\u2005\\u00A0]*\\n[ \\t\\u2005\\u00A0]*")
+    private val trailingBracketSpaceRegex = Regex("[ \\t\\u2005\\u00A0]+\\]")
 
-    fun containsAtAi(raw: String): Boolean = atAiTagRegex.containsMatchIn(raw)
+    private fun isAsciiWordChar(c: Char): Boolean =
+        c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_'
 
-    /** Removes `@ai` trigger tokens before passing conversation text to the LLM or compactor. */
-    fun stripAtAiForModel(raw: String): String =
-        atAiTagRegex.replace(raw, " ")
-            .replace(Regex("[ \\t]{2,}"), " ")
-            .replace(Regex("\\s*\n\\s*"), "\n")
-            .trim()
+    private fun trimHorizontalAndStandard(raw: String): String =
+        raw.trim { it.isWhitespace() || it == '\u2005' || it == '\u00A0' }
+
+    private fun wakeRegexPair(wakeWord: String): Pair<Regex, Regex>? {
+        val token = wakeWord.trim()
+        if (token.isEmpty()) return null
+        if (token == cachedWakeToken) {
+            val w = cachedWakeRegex
+            val l = cachedLeadingWakeRegex
+            if (w != null && l != null) return w to l
+        }
+        synchronized(wakeRegexLock) {
+            if (token == cachedWakeToken) {
+                val w = cachedWakeRegex
+                val l = cachedLeadingWakeRegex
+                if (w != null && l != null) return w to l
+            }
+            val escaped = Regex.escape(token)
+            val first = token.first()
+            val last = token.last()
+            val prefix = if (isAsciiWordChar(first) || first == '@' || first == '/' || first == '.') {
+                "(?<![a-zA-Z0-9_])"
+            } else {
+                ""
+            }
+            val suffix = when {
+                last in 'a'..'z' || last in 'A'..'Z' -> "(?![a-zA-Z])"
+                last in '0'..'9' -> "(?![0-9])"
+                else -> ""
+            }
+            val fullRegex = Regex("$prefix$escaped$suffix", RegexOption.IGNORE_CASE)
+            val leadingRegex = Regex(
+                "^[ \\t\\u2005\\u00A0]*$escaped$suffix[:：,， \\t\\u2005\\u00A0]*",
+                setOf(RegexOption.IGNORE_CASE, RegexOption.MULTILINE),
+            )
+            cachedWakeToken = token
+            cachedWakeRegex = fullRegex
+            cachedLeadingWakeRegex = leadingRegex
+            return fullRegex to leadingRegex
+        }
+    }
+
+    fun buildWakeWordRegex(wakeWord: String): Regex? = wakeRegexPair(wakeWord)?.first
+
+    fun buildLeadingWakeWordRegex(wakeWord: String): Regex? = wakeRegexPair(wakeWord)?.second
+
+    fun containsWakeWord(raw: String, wakeWord: String = AgentConfigStore.getConfig().wakeWord): Boolean =
+        buildWakeWordRegex(wakeWord)?.containsMatchIn(raw) == true
+
+    /**
+     * Masks/removes configured wake-word trigger tokens before passing conversation text to the LLM or compactor.
+     * Leaves text untouched when wake-word mode is disabled.
+     */
+    fun stripWakeWordForModel(raw: String, cfg: AgentConfigStore.ModelConfig = AgentConfigStore.getConfig()): String {
+        if (!cfg.wakeWordEnabled) return trimHorizontalAndStandard(raw)
+        return stripWakeWord(raw, cfg.wakeWord)
+    }
+
+    fun stripWakeWord(raw: String, wakeWord: String): String {
+        val (regex, leadingRegex) = wakeRegexPair(wakeWord) ?: return trimHorizontalAndStandard(raw)
+        val closeIdx = findQuotePrefixEnd(raw)
+        if (closeIdx >= 0) {
+            val quoteRaw = raw.substring(0, closeIdx + 1)
+            val replyRaw = raw.substring(closeIdx + 1)
+            val quoteClean = trimHorizontalAndStandard(
+                lineSpaceRegex.replace(
+                    multiSpaceRegex.replace(
+                        trailingBracketSpaceRegex.replace(regex.replace(quoteRaw, " "), "]"),
+                        " ",
+                    ),
+                    "\n",
+                ),
+            )
+            val replyClean = stripWakeWordFromSegment(replyRaw, regex, leadingRegex)
+            return if (replyClean.isNotEmpty()) "$quoteClean $replyClean" else quoteClean
+        }
+        return stripWakeWordFromSegment(raw, regex, leadingRegex)
+    }
+
+    private fun findQuotePrefixEnd(raw: String): Int {
+        if (!raw.startsWith("[引用 ")) return -1
+        var depth = 0
+        for (i in raw.indices) {
+            when (raw[i]) {
+                '[' -> depth++
+                ']' -> {
+                    depth--
+                    if (depth == 0) return i
+                }
+            }
+        }
+        return raw.indexOf("] ")
+    }
+
+    private fun stripWakeWordFromSegment(raw: String, regex: Regex, leadingRegex: Regex): String {
+        var text = trimHorizontalAndStandard(raw)
+        if (text.isEmpty()) return ""
+        for (i in 0 until 16) {
+            val next = leadingRegex.replace(text, "")
+            if (next == text) break
+            text = next
+        }
+        text = regex.replace(text, " ")
+        text = multiSpaceRegex.replace(text, " ")
+        text = lineSpaceRegex.replace(text, "\n")
+        return trimHorizontalAndStandard(text)
+    }
 }
 
 /**
  * Tracks recent outgoing messages sent by the Agent itself so `MsgInfoStorage.insert`
- * attributes them correctly instead of double-recording them as `master` input or re-triggering `@ai`.
+ * attributes them correctly instead of double-recording them as `master` input or re-triggering wake-word replies.
  */
 object AgentSentTracker {
+    enum class MediaKind { IMAGE, FILE }
+
+    private data class PendingMedia(
+        val token: Long,
+        val kind: MediaKind,
+        val fileName: String,
+        val timestampMs: Long,
+    )
+
     private const val TTL_MS = 30_000L
     private val recentByTalker = ConcurrentHashMap<String, MutableList<Pair<String, Long>>>()
+    private val mediaTokenSeq = AtomicLong(0L)
+    private val recentMediaByTalker = ConcurrentHashMap<String, MutableList<PendingMedia>>()
 
     fun markSent(talker: String, text: String) {
         val norm = text.trim()
@@ -153,6 +273,59 @@ object AgentSentTracker {
             val idx = list.indexOfFirst { it.first == norm }
             if (idx >= 0) {
                 list.removeAt(idx)
+                return true
+            }
+        }
+        return false
+    }
+
+    fun markSentMedia(talker: String, kind: MediaKind, fileName: String = ""): Long {
+        if (talker.isBlank()) return 0L
+        val now = System.currentTimeMillis()
+        val token = mediaTokenSeq.incrementAndGet()
+        val list = recentMediaByTalker.getOrPut(talker) { mutableListOf() }
+        synchronized(list) {
+            list.removeAll { now - it.timestampMs > TTL_MS }
+            list.add(PendingMedia(token, kind, fileName.trim(), now))
+        }
+        return token
+    }
+
+    fun cancelSentMedia(talker: String, token: Long) {
+        if (talker.isBlank() || token <= 0L) return
+        val list = recentMediaByTalker[talker] ?: return
+        synchronized(list) {
+            list.removeAll { it.token == token }
+        }
+    }
+
+    fun consumeMediaSentByAgent(talker: String, msgType: Int, formattedBody: String): Boolean {
+        if (talker.isBlank()) return false
+        val expectedKind = when {
+            msgType == 3 -> MediaKind.IMAGE
+            (msgType == 49 || (msgType > 0 && (msgType and 0xFF) == 49)) && formattedBody.startsWith("[文件:") ->
+                MediaKind.FILE
+            else -> return false
+        }
+        val list = recentMediaByTalker[talker] ?: return false
+        val now = System.currentTimeMillis()
+        synchronized(list) {
+            list.removeAll { now - it.timestampMs > TTL_MS }
+            if (expectedKind == MediaKind.FILE) {
+                val bodyTitle = formattedBody.removePrefix("[文件:").removeSuffix("]").trim()
+                if (bodyTitle.isNotEmpty()) {
+                    val exactIdx = list.indexOfFirst {
+                        it.kind == MediaKind.FILE && it.fileName.equals(bodyTitle, ignoreCase = true)
+                    }
+                    if (exactIdx >= 0) {
+                        list.removeAt(exactIdx)
+                        return true
+                    }
+                }
+            }
+            val fallbackIdx = list.indexOfFirst { it.kind == expectedKind }
+            if (fallbackIdx >= 0) {
+                list.removeAt(fallbackIdx)
                 return true
             }
         }

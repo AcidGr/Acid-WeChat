@@ -2,6 +2,7 @@ package com.acid.wechat.features
 
 import android.content.ContentValues
 import com.acid.wechat.agent.AcidAgentLoop
+import com.acid.wechat.agent.AgentConfigStore
 import com.acid.wechat.agent.AgentSentTracker
 import com.acid.wechat.agent.AgentSessionModels
 import com.acid.wechat.agent.AgentSessionStore
@@ -29,7 +30,7 @@ import kotlin.math.abs
  * Per-chat on-device Agent integration:
  * 1) Adds the top-right "AI" entry in ChattingUI via [ChatHeaderAiHook].
  * 2) Syncs live WeChat messages into active per-chat sessions.
- * 3) Auto-triggers on-device replies for all group `@me`/`@ai`, private `@ai`, and self `@ai`.
+ * 3) Auto-triggers on-device replies based on configurable group `@me` and wake-word settings.
  */
 object ChatAgentFeature : AcidFeature {
     private const val TAG = "ChatAgent"
@@ -126,9 +127,14 @@ object ChatAgentFeature : AcidFeature {
             val body = ChatQueryRepository.formatMessageBody(talker, isSend, type, rawContent, insertedMsgId, imgPath, msgSvrId)
             if (body.isBlank()) return
 
-            val senderName = if (isSend) "master" else ChatRepository.resolveSenderDisplayName(talker, rawContent, null)
             if (isSend && AgentSentTracker.consumeIfSentByAgent(talker, body)) {
                 return
+            }
+            val sentByAgentMedia = isSend && AgentSentTracker.consumeMediaSentByAgent(talker, type, body)
+            val senderName = when {
+                sentByAgentMedia -> "AI"
+                isSend -> "master"
+                else -> ChatRepository.resolveSenderDisplayName(talker, rawContent, null)
             }
 
             if (AgentSessionStore.hasExistingSession(talker)) {
@@ -140,21 +146,28 @@ object ChatAgentFeature : AcidFeature {
                     senderName = senderName,
                     body = body,
                     timestampMs = createTimeMs,
+                    sentByAgent = sentByAgentMedia,
                 )
                 AcidAgentLoop.notifyExternalTimelineUpdate(talker)
             }
+            if (sentByAgentMedia) return
 
             if (!FeatureRegistry.isEnabled(this)) return
             if (!WeChatMessageFormatter.isTextOrAppMsgType(type)) return
             if (abs(System.currentTimeMillis() - createTimeMs) > LIVE_MSG_WINDOW_MS) return
 
             val triggerText = WeChatMessageFormatter.extractTriggerText(rawContent, body)
+            val agentCfg = AgentConfigStore.getConfig()
+            val wakeWordMatched = agentCfg.wakeWordEnabled &&
+                AgentSessionModels.containsWakeWord(triggerText, agentCfg.wakeWord)
+            val groupAtMatched = talker.endsWith("@chatroom") &&
+                agentCfg.wakeOnGroupAt &&
+                isMentioningSelf(msgObj, values)
             val shouldTrigger = if (isSend) {
-                containsAtAi(triggerText)
+                wakeWordMatched
             } else {
-                if (!ConfigStore.isEffective(ConfigSchema.CHAT_AGENT_PASSIVE_AT)) false
-                else if (talker.endsWith("@chatroom")) containsAtAi(triggerText) || isMentioningSelf(msgObj, values)
-                else containsAtAi(triggerText)
+                ConfigStore.isEffective(ConfigSchema.CHAT_AGENT_PASSIVE_AT) &&
+                    (wakeWordMatched || groupAtMatched)
             }
             if (!shouldTrigger) return
 
@@ -176,15 +189,16 @@ object ChatAgentFeature : AcidFeature {
 
             triggerCount.incrementAndGet()
             FeatureRegistry.recordHit(id)
-            AcidLogger.i(TAG, "triggered chat agent in $talker (isSend=$isSend, msgId=$insertedMsgId)")
+            AcidLogger.i(
+                TAG,
+                "triggered chat agent in $talker (isSend=$isSend, msgId=$insertedMsgId, wakeWord=$wakeWordMatched, groupAt=$groupAtMatched)",
+            )
             AcidAgentLoop.submitChatTrigger(talker = talker, isMaster = isSend)
         }.onFailure {
             FeatureRegistry.recordError(id, it)
             AcidLogger.w(TAG, "onMessageInserted failed", it)
         }
     }
-
-    private fun containsAtAi(body: String): Boolean = AgentSessionModels.containsAtAi(body)
 
     private fun isMentioningSelf(msgObj: Any, values: ContentValues): Boolean {
         val selfWxid = ChatRepository.querySelfWxid() ?: return false
@@ -226,6 +240,10 @@ object ChatAgentFeature : AcidFeature {
     }
 
     override fun statusJson(): JSONObject = super.statusJson().apply {
+        val cfg = AgentConfigStore.getConfig()
         put("triggerCount", triggerCount.get())
+        put("wakeOnGroupAt", cfg.wakeOnGroupAt)
+        put("wakeWordEnabled", cfg.wakeWordEnabled)
+        put("wakeWord", cfg.wakeWord)
     }
 }

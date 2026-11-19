@@ -528,7 +528,7 @@
     if (!items.length && !hasMore) {
       box.innerHTML = isGlobal
         ? `<div class="empty-state">全局统筹会话（不绑定单个私聊/群聊）<br/>可跨会话检索联系人、读取记录或按指令代发消息</div>`
-        : `<div class="empty-state">当前会话暂无消息<br/>在下方直接以 master 身份对话，或在微信内通过 @ 触发自动回复</div>`;
+        : `<div class="empty-state">当前会话暂无消息<br/>在下方直接以 master 身份对话，或在微信内通过 @ 或唤醒词触发自动回复</div>`;
       return;
     }
 
@@ -565,10 +565,13 @@
         const sendBtnHtml = (!isGlobal && !it.running && !it.chatVisible && it.text && it.text.trim())
           ? `<button class="mini-send-btn" onclick="sendBubbleToWeChat(this, '${escAttr(it.id)}', ${idx})">发到当前聊天</button>`
           : "";
+        const bodyHtml = /^\[图片:\s*[^\]]+\]$/.test((it.text || "").trim())
+          ? formatChatBubbleText(it.text)
+          : renderMarkdown(it.text);
         parts.push(`
           <div class="msg-row left">
             <div class="bubble-meta">${renderEyeIcon(!!it.chatVisible)}<span>AI · ${tm}</span>${goldTag}</div>
-            <div class="bubble bubble-agent ${compCls}">${renderMarkdown(it.text)}</div>
+            <div class="bubble bubble-agent ${compCls}">${bodyHtml}</div>
             ${sendBtnHtml}
           </div>
         `);

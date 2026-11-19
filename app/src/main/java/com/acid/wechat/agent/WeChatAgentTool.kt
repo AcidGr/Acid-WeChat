@@ -169,14 +169,20 @@ object WeChatAgentTool : AgentTool {
             offset = args.optInt("offset", 0),
             keyword = args.optString("keyword", "").ifBlank { null },
         )
+        val agentCfg = AgentConfigStore.getConfig()
         val arr = JSONArray()
         for (m in msgs) {
+            val content = if (agentCfg.wakeWordEnabled && AgentSessionModels.containsWakeWord(m.content, agentCfg.wakeWord)) {
+                AgentSessionModels.stripWakeWordForModel(m.content, agentCfg).ifEmpty { "(呼叫了 AI)" }
+            } else {
+                m.content
+            }
             arr.put(JSONObject().apply {
                 put("time", m.timeText)
                 put("sender", m.senderName)
                 put("isSend", m.isSend)
                 put("type", m.typeLabel)
-                put("content", m.content)
+                put("content", content)
             })
         }
         return ToolResult(

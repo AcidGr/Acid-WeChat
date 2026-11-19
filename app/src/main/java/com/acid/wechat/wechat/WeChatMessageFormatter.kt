@@ -32,7 +32,7 @@ object WeChatMessageFormatter {
         extractGroup(titleTagRegex, stripped)?.takeIf { it.isNotEmpty() }
 
     /**
-     * Extracts the newly typed reply text when checking `@ai` triggers, ignoring `@ai`
+     * Extracts the newly typed reply text when checking wake-word triggers, ignoring wake words
      * that might appear inside the quoted `<refermsg>` body.
      */
     fun extractTriggerText(rawContent: String, formattedBody: String): String {

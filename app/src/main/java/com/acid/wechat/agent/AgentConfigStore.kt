@@ -23,6 +23,7 @@ object AgentConfigStore {
     const val DEFAULT_MAX_STEPS = 40
     const val DEFAULT_AUTO_COMPACT_TOKENS = 72_000
     const val DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image"
+    const val DEFAULT_WAKE_WORD = "@ai"
 
     val ALL_TOOL_NAMES: List<String> get() = AgentToolRegistry.allToolNames()
     val DEFAULT_ENABLED_TOOLS: Set<String> = setOf("wechat", "sendfile", "readimage", "read", "write", "edit", "bash")
@@ -38,7 +39,7 @@ object AgentConfigStore {
 1. 发送出口强约定：你没有发消息工具，你这次回复的最终文本输出本身就会直接作为这条微信消息发到当前聊天中；严禁输出“我已帮你发过去了”“好的这就回他”“已发送给对方”等元话语，请直接说出要发给当前聊天的那句正文。
 2. 自然融入：平时以机主视角或贴近机主口吻简要回应，不要主动自称机器人或 AI；只有在对方明确质疑“你是不是机器人 / 不是本人吧”时，才坦诚你是机主的助手，并说明机主本人稍后会看消息。
 3. 严守物理边界：绝对禁止编造机主此刻的物理位置、行程或正在做什么（不知道的事绝不瞎编）；若被问到行踪、线下见/约时间、借钱/借物、或需要机主拍板的承诺/决定，统一用自然短句推脱或转告“这会儿走不开 / 晚点本人联系你”。
-4. 回复格式强约束（微信实发文本）：必须像真人发微信一样简短克制，一般只回复 1～2 句；严禁使用任何 Markdown（禁止 **、#、代码块、表格、引用 >、有序/无序列表）以及 emoji 表情，也不要带 @ai 前缀。
+4. 回复格式强约束（微信实发文本）：必须像真人发微信一样简短克制，一般只回复 1～2 句；严禁使用任何 Markdown（禁止 **、#、代码块、表格、引用 >、有序/无序列表）以及 emoji 表情，也不要带唤醒词前缀。
     """.trimIndent()
 
     data class ModelConfig(
@@ -61,6 +62,9 @@ object AgentConfigStore {
         val webFetchBaseUrl: String = "",
         val webFetchApiKey: String = "",
         val allowGuestDrawImage: Boolean = false,
+        val wakeOnGroupAt: Boolean = true,
+        val wakeWordEnabled: Boolean = true,
+        val wakeWord: String = DEFAULT_WAKE_WORD,
     ) {
         val hasApiKey: Boolean get() = apiKey.isNotBlank() || isLoopbackBaseUrl(baseUrl)
 
@@ -74,6 +78,9 @@ object AgentConfigStore {
 
     fun sanitizeAutoCompactTokens(raw: Int): Int =
         if (raw <= 0) 0 else raw.coerceIn(1_000, 2_000_000)
+
+    fun sanitizeWakeWord(raw: String): String =
+        raw.trim().take(64).ifEmpty { DEFAULT_WAKE_WORD }
 
     fun normalizeReasoningEffort(raw: String): String {
         val norm = raw.trim().lowercase()
@@ -96,7 +103,12 @@ object AgentConfigStore {
 
     private fun sanitizeConfig(cfg: ModelConfig): ModelConfig {
         val filtered = canonicalTools(cfg.enabledTools.filterTo(LinkedHashSet()) { cfg.isToolConfigured(it) })
-        return if (filtered == cfg.enabledTools) cfg else cfg.copy(enabledTools = filtered)
+        val cleanWake = sanitizeWakeWord(cfg.wakeWord)
+        return if (filtered == cfg.enabledTools && cleanWake == cfg.wakeWord) {
+            cfg
+        } else {
+            cfg.copy(enabledTools = filtered, wakeWord = cleanWake)
+        }
     }
 
     fun isLoopbackBaseUrl(url: String): Boolean {
@@ -242,6 +254,15 @@ object AgentConfigStore {
             if (patch.has("allowGuestDrawImage")) {
                 next = next.copy(allowGuestDrawImage = patch.optBoolean("allowGuestDrawImage", false))
             }
+            if (patch.has("wakeOnGroupAt")) {
+                next = next.copy(wakeOnGroupAt = patch.optBoolean("wakeOnGroupAt", true))
+            }
+            if (patch.has("wakeWordEnabled")) {
+                next = next.copy(wakeWordEnabled = patch.optBoolean("wakeWordEnabled", true))
+            }
+            if (patch.has("wakeWord")) {
+                next = next.copy(wakeWord = sanitizeWakeWord(patch.optString("wakeWord", "")))
+            }
             patch.optJSONArray("enabledTools")?.let { arr ->
                 next = next.copy(enabledTools = parseEnabledTools(arr))
             }
@@ -276,6 +297,10 @@ object AgentConfigStore {
         put("defaultAutoReplySystemPrompt", DEFAULT_AUTO_REPLY_SYSTEM_PROMPT)
         put("enabledTools", JSONArray(ALL_TOOL_NAMES.filter { it in cfg.enabledTools }))
         put("allowGuestDrawImage", cfg.allowGuestDrawImage)
+        put("wakeOnGroupAt", cfg.wakeOnGroupAt)
+        put("wakeWordEnabled", cfg.wakeWordEnabled)
+        put("wakeWord", sanitizeWakeWord(cfg.wakeWord))
+        put("defaultWakeWord", DEFAULT_WAKE_WORD)
         put("toolCatalog", AgentToolRegistry.catalogJson())
         put("webSearchBaseUrl", cfg.webSearchBaseUrl)
         put("webSearchApiKey", cfg.webSearchApiKey)
@@ -376,6 +401,9 @@ object AgentConfigStore {
                     webFetchBaseUrl = obj.optString("web_fetch_base_url", "").trim(),
                     webFetchApiKey = obj.optString("web_fetch_api_key", "").trim(),
                     allowGuestDrawImage = obj.optBoolean("allow_guest_draw_image", false),
+                    wakeOnGroupAt = obj.optBoolean("wake_on_group_at", true),
+                    wakeWordEnabled = obj.optBoolean("wake_word_enabled", true),
+                    wakeWord = sanitizeWakeWord(obj.optString("wake_word", DEFAULT_WAKE_WORD)),
                 ),
             )
             lastMtime = f.lastModified()
@@ -408,6 +436,9 @@ object AgentConfigStore {
                 put("web_fetch_base_url", cleanCfg.webFetchBaseUrl)
                 put("web_fetch_api_key", cleanCfg.webFetchApiKey)
                 put("allow_guest_draw_image", cleanCfg.allowGuestDrawImage)
+                put("wake_on_group_at", cleanCfg.wakeOnGroupAt)
+                put("wake_word_enabled", cleanCfg.wakeWordEnabled)
+                put("wake_word", cleanCfg.wakeWord)
             }
             val f = modelsFile()
             AcidIo.writeAtomicUtf8(f, obj.toString(2))

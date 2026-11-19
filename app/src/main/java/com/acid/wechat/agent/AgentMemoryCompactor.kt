@@ -28,7 +28,7 @@ object AgentMemoryCompactor {
             return CompactOutcome(false, error = "暂无足够历史记录可压缩（保留最近 ${AgentSessionModels.KEEP_RECENT_ON_COMPACT} 条活跃消息）")
         }
 
-        val transcript = buildTranscript(itemsToCompact)
+        val transcript = buildTranscript(itemsToCompact, cfg)
         val systemPrompt = "你是一个精准的会话记忆压缩引擎，请把聊天记录和 AI 动作整理为简洁、客观的中文状态快照。"
         val userPrompt = buildString {
             append("请将以下历史消息整理为「长期记忆与系统状态快照」，重点提取：\n")
@@ -80,10 +80,14 @@ object AgentMemoryCompactor {
         return CompactOutcome(ok = true, summary = formatted)
     }
 
-    private fun buildTranscript(items: List<TimelineItem>): String = buildString {
+    private fun buildTranscript(items: List<TimelineItem>, cfg: AgentConfigStore.ModelConfig): String = buildString {
         for (it in items) {
             val t = formatContextTime(it.timestampMs)
-            val cleanText = AgentSessionModels.stripAtAiForModel(it.text).ifEmpty { "(呼叫了 AI)" }
+            val cleanText = if (it.chatVisible) {
+                AgentSessionModels.stripWakeWordForModel(it.text, cfg).ifEmpty { "(呼叫了 AI)" }
+            } else {
+                it.text.trim()
+            }
             when (it.kind) {
                 "master" -> {
                     val vis = if (it.chatVisible) "聊天框" else "面板私聊·对方不可见"

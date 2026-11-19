@@ -112,7 +112,7 @@ internal object AgentLoopRunner {
                 val toolCalls = assistantMsg.optJSONArray("tool_calls")
                 if (toolCalls == null || toolCalls.length() == 0) {
                     if (sendReplyToWeChat && replyItem != null && !isCancelled(rs, gen)) {
-                        val cleaned = AgentContextBuilder.cleanForWeChat(finalReplyText)
+                        val cleaned = AgentContextBuilder.cleanForWeChat(finalReplyText, cfg)
                         if (cleaned.isNotEmpty()) {
                             replyItem!!.text = cleaned
                             AgentSentTracker.markSent(talker, cleaned)

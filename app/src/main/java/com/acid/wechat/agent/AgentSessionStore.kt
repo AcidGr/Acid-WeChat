@@ -86,11 +86,22 @@ object AgentSessionStore {
         senderName: String,
         body: String,
         timestampMs: Long,
+        sentByAgent: Boolean = false,
     ): ChatSessionState? {
         if (body.isBlank() || !hasExistingSession(talker)) return null
         val session = getOrLoad(talker)
-        if (isSend && AgentSentTracker.consumeIfSentByAgent(talker, body)) {
+        if (isSend && !sentByAgent && AgentSentTracker.consumeIfSentByAgent(talker, body)) {
             return session
+        }
+        val itemKind = when {
+            sentByAgent -> "agent"
+            isSend -> "master"
+            else -> "peer"
+        }
+        val itemSender = when {
+            sentByAgent -> "AI"
+            isSend -> "master"
+            else -> senderName
         }
         val changed = synchronized(session) {
             val dup = session.timeline.indexOfLast {
@@ -106,8 +117,8 @@ object AgentSessionStore {
             } else {
                 session.timeline += TimelineItem(
                     id = session.nextId(),
-                    kind = if (isSend) "master" else "peer",
-                    senderName = if (isSend) "master" else senderName,
+                    kind = itemKind,
+                    senderName = itemSender,
                     timestampMs = timestampMs,
                     timeText = formatBubbleTime(timestampMs),
                     text = body,

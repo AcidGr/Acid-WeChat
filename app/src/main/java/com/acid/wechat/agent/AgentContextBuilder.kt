@@ -43,35 +43,51 @@ object AgentContextBuilder {
         out.put(JSONObject().put("role", "system").put("content", systemPrompt))
 
         val isGlobal = talker == GLOBAL_TALKER
-        // Assemble active (uncompacted) conversational history; merge adjacent user-side turns.
+        // Assemble active (uncompacted) conversational history; merge adjacent user-side and assistant-side turns.
         val userBuf = StringBuilder()
+        val assistantBuf = StringBuilder()
         fun flushUser() {
             if (userBuf.isNotEmpty()) {
                 out.put(JSONObject().put("role", "user").put("content", userBuf.toString().trim()))
                 userBuf.clear()
             }
         }
+        fun flushAssistant() {
+            if (assistantBuf.isNotEmpty()) {
+                out.put(JSONObject().put("role", "assistant").put("content", assistantBuf.toString().trim()))
+                assistantBuf.clear()
+            }
+        }
 
         for (it in timeline) {
             if (it.compacted || !it.isConversationalBubble()) continue
-            // Never leak private AI-panel prompts/drafts when triggered by an external member (`@ai`).
+            // Never leak private AI-panel prompts/drafts when triggered by an external member.
             if (!isGlobal && mode == InvocationMode.CHAT_TRIGGER_GUEST && !it.chatVisible) continue
             val t = formatContextTime(it.timestampMs)
             when (it.kind) {
                 "master" -> {
-                    val cleaned = AgentSessionModels.stripAtAiForModel(it.text)
-                        .ifEmpty { "(呼叫了你，请结合上下文回应)" }
+                    flushAssistant()
+                    val isWakeTriggered = it.chatVisible &&
+                        cfg.wakeWordEnabled &&
+                        AgentSessionModels.containsWakeWord(it.text, cfg.wakeWord)
+                    val cleaned = if (it.chatVisible) {
+                        AgentSessionModels.stripWakeWordForModel(it.text, cfg)
+                            .ifEmpty { "(呼叫了你，请结合上下文回应)" }
+                    } else {
+                        it.text.trim()
+                    }
                     val senderTag = when {
                         isGlobal -> "master"
                         !it.chatVisible -> "master(AI面板私聊·对方不可见)"
-                        AgentSessionModels.containsAtAi(it.text) -> "master(聊天框@ai·对方可见)"
+                        isWakeTriggered -> "master(聊天框唤醒·对方可见)"
                         else -> "master(聊天框已发·对方可见)"
                     }
                     if (userBuf.isNotEmpty()) userBuf.append('\n')
                     userBuf.append('[').append(senderTag).append(' ').append(t).append("]: ").append(cleaned)
                 }
                 "peer" -> {
-                    val cleaned = AgentSessionModels.stripAtAiForModel(it.text)
+                    flushAssistant()
+                    val cleaned = AgentSessionModels.stripWakeWordForModel(it.text, cfg)
                         .ifEmpty { "(在聊天中呼叫了你，请结合最近对话简短回应)" }
                     if (userBuf.isNotEmpty()) userBuf.append('\n')
                     val name = it.senderName.ifBlank { "对方" }
@@ -88,12 +104,14 @@ object AgentContextBuilder {
                         } else {
                             body
                         }
-                        out.put(JSONObject().put("role", "assistant").put("content", assistantText))
+                        if (assistantBuf.isNotEmpty()) assistantBuf.append('\n')
+                        assistantBuf.append(assistantText)
                     }
                 }
             }
         }
         flushUser()
+        flushAssistant()
 
         for (extra in inFlightToolMessages) {
             out.put(extra)
@@ -186,7 +204,7 @@ $toolsDesc$sendHint
                         """
 面板助手（单会话专属面板） · 作用域：$chatScope。
 上下文约定：
-- `[master(聊天框已发·对方可见) 时间]` / `[master(聊天框@ai·对方可见) 时间]`：机主本人在微信聊天框真实发出、对方能看见的话。
+- `[master(聊天框已发·对方可见) 时间]` / `[master(聊天框唤醒·对方可见) 时间]`：机主本人在微信聊天框真实发出、对方能看见的话。
 - `[master(AI面板私聊·对方不可见) 时间]`：机主点开右上角 AI 面板私下发给你的话，**对方在微信里完全看不见**。
 - `[对方/群友名(聊天框) 时间]`：该私聊对方或群成员在微信聊天里发来的消息。
 - 你的历史回复前缀 `[已发到聊天框]` 与 `[仅面板私聊·未发到聊天框]` 用于区分是否已真正发进微信（你输出的回复正文严禁携带这些方括号标记）。
@@ -251,8 +269,18 @@ $permRule
         return sb.toString()
     }
 
-    fun cleanForWeChat(raw: String): String {
-        var text = stripVisibilityTag(raw).trim().replaceFirst(Regex("^@ai\\b[:：,\\s]*", RegexOption.IGNORE_CASE), "")
+    fun cleanForWeChat(raw: String, cfg: AgentConfigStore.ModelConfig = AgentConfigStore.getConfig()): String {
+        var text = stripVisibilityTag(raw).trim()
+        if (cfg.wakeWordEnabled) {
+            val leadingWake = AgentSessionModels.buildLeadingWakeWordRegex(cfg.wakeWord)
+            if (leadingWake != null) {
+                for (i in 0 until 8) {
+                    val m = leadingWake.find(text)
+                    if (m == null || m.range.first != 0) break
+                    text = text.substring(m.range.last + 1).trimStart()
+                }
+            }
+        }
         text = mdFence.replace(text, "")
         text = mdBold.replace(text, "$1")
         text = mdCode.replace(text, "$1")

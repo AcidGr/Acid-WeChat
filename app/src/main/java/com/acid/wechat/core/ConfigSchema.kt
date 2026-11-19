@@ -175,8 +175,8 @@ object ConfigSchema {
         "在聊天右上角聊天信息左侧添加 AI 按钮，并维护每个私聊/群聊的独立会话上下文",
     ))
     val CHAT_AGENT_PASSIVE_AT = register(BoolSpec(
-        "chat_agent_passive_at", true, FeatureCategory.CHAT, "AI 助手", "收到 @ 自动回复",
-        "群聊被 @我/@ai 或私聊收到 @ai 时自动调用本机 Agent 回复",
+        "chat_agent_passive_at", true, FeatureCategory.CHAT, "AI 助手", "收到唤醒自动回复",
+        "群聊被 @我 或收到唤醒词时自动调用本机 Agent 回复",
         dependsOn = CHAT_AGENT_ENABLED.key,
     ))
     val GLOBAL_AGENT_ENTRY = register(BoolSpec(

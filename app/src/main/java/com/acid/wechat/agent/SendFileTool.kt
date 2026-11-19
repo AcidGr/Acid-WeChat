@@ -102,19 +102,28 @@ object SendFileTool : AgentTool {
             else -> isImageExt
         }
 
+        val displayFileName = customTitle ?: file.name
         var actualMode = if (wantImage) "image" else "file"
         var sendRes = if (wantImage) {
-            WeChatSender.sendImage(targetTalker, file, rawImage)
+            val token = AgentSentTracker.markSentMedia(targetTalker, AgentSentTracker.MediaKind.IMAGE, file.name)
+            WeChatSender.sendImage(targetTalker, file, rawImage).also { res ->
+                if (!res.ok) AgentSentTracker.cancelSentMedia(targetTalker, token)
+            }
         } else {
-            WeChatSender.sendFile(targetTalker, file, customTitle)
+            val token = AgentSentTracker.markSentMedia(targetTalker, AgentSentTracker.MediaKind.FILE, displayFileName)
+            WeChatSender.sendFile(targetTalker, file, customTitle).also { res ->
+                if (!res.ok) AgentSentTracker.cancelSentMedia(targetTalker, token)
+            }
         }
 
         if (!sendRes.ok && wantImage && asType == "auto") {
+            val fallbackToken = AgentSentTracker.markSentMedia(targetTalker, AgentSentTracker.MediaKind.FILE, displayFileName)
             val fallback = WeChatSender.sendFile(targetTalker, file, customTitle)
             if (fallback.ok) {
                 actualMode = "file"
                 sendRes = fallback
             } else {
+                AgentSentTracker.cancelSentMedia(targetTalker, fallbackToken)
                 sendRes = WeChatSender.SendResult(false, "${sendRes.detail}; fallback sendFile failed: ${fallback.detail}")
             }
         }

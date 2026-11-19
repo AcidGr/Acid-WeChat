@@ -5,9 +5,13 @@ import android.app.Dialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -26,6 +30,7 @@ import com.acid.wechat.core.FeatureOption
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.HostContext
 import com.acid.wechat.debug.DebugServer
+import com.acid.wechat.wechat.WeChatAbTestStore
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -77,6 +82,10 @@ object SettingsDialog {
                     put("label", cat.label)
                 })
             }
+            cats.put(JSONObject().apply {
+                put("id", "abtest")
+                put("label", "灰度")
+            })
 
             val items = JSONArray()
             for (st in FeatureRegistry.allStates()) {
@@ -233,6 +242,42 @@ object SettingsDialog {
                 val cm = activity.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
                 cm?.setPrimaryClip(ClipData.newPlainText("AcidWeChatDiag", diag))
                 Toast.makeText(activity, "已复制诊断信息", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        @JavascriptInterface
+        fun getAbTestState(includeIncompatible: Boolean): String =
+            WeChatAbTestStore.buildUiSnapshot(includeIncompatible).toString()
+
+        @JavascriptInterface
+        fun setAbTestValue(type: String, key: String, value: String): String =
+            WeChatAbTestStore.setValue(type, key, value).toString()
+
+        @JavascriptInterface
+        fun queryAbTestKey(type: String, key: String): String =
+            WeChatAbTestStore.queryKey(type, key).toString()
+
+        @JavascriptInterface
+        fun resetAbTest(): String =
+            WeChatAbTestStore.resetAll().toString()
+
+        @JavascriptInterface
+        fun restartHost() {
+            activity.runOnUiThread {
+                runCatching { if (dialog.isShowing) dialog.dismiss() }
+                runCatching {
+                    val launchIntent = activity.packageManager.getLaunchIntentForPackage(activity.packageName)
+                    if (launchIntent != null) {
+                        launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+                        activity.startActivity(launchIntent)
+                    }
+                    activity.finishAffinity()
+                }.onFailure {
+                    AcidLogger.w(TAG, "restartHost failed", it)
+                }
+                Handler(Looper.getMainLooper()).postDelayed({
+                    Process.killProcess(Process.myPid())
+                }, 150L)
             }
         }
 
