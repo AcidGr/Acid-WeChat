@@ -29,6 +29,73 @@ object AcidLlmClient {
         val error: String = "",
     )
 
+    internal data class HttpJsonResponse(val code: Int, val body: String)
+
+    private val knownEndpointSuffixes = listOf(
+        "/chat/completions", "/responses", "/images/generations", "/images/edits",
+        "/tools/search", "/tools/fetch",
+    )
+
+    internal fun stripOpenAiEndpointSuffix(baseUrl: String): String {
+        var b = baseUrl.trim().trimEnd('/')
+        for (suffix in knownEndpointSuffixes) {
+            if (b.endsWith(suffix, ignoreCase = true)) {
+                b = b.removeRange(b.length - suffix.length, b.length)
+                break
+            }
+        }
+        return b
+    }
+
+    internal fun resolveOpenAiEndpoint(baseUrl: String, subPath: String): String {
+        val b = stripOpenAiEndpointSuffix(baseUrl)
+        val normalizedSub = if (subPath.startsWith("/")) subPath else "/$subPath"
+        return "$b$normalizedSub"
+    }
+
+    internal fun resolveVersionedToolEndpoint(baseUrl: String, toolSubPath: String): String {
+        val b = stripOpenAiEndpointSuffix(baseUrl)
+        val normTool = if (toolSubPath.startsWith("/")) toolSubPath else "/$toolSubPath"
+        val path = runCatching { java.net.URI(b).path.orEmpty().trim('/') }.getOrDefault("")
+        return if (path.isEmpty()) "$b/v1$normTool" else "$b$normTool"
+    }
+
+    internal fun postJson(
+        endpoint: String,
+        apiKey: String,
+        body: JSONObject,
+        extraHeaders: Map<String, String> = emptyMap(),
+        readTimeoutMs: Int = 90_000,
+    ): HttpJsonResponse {
+        val conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            instanceFollowRedirects = false
+            requestMethod = "POST"
+            connectTimeout = 15_000
+            readTimeout = readTimeoutMs
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json; charset=utf-8")
+            setRequestProperty("Accept", "application/json")
+            if (apiKey.isNotBlank()) {
+                setRequestProperty("Authorization", "Bearer $apiKey")
+            }
+            for ((k, v) in extraHeaders) {
+                setRequestProperty(k, v)
+            }
+        }
+        return try {
+            conn.outputStream.use { os ->
+                os.write(body.toString().toByteArray(Charsets.UTF_8))
+                os.flush()
+            }
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val respBody = runCatching { stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } }.getOrNull().orEmpty()
+            HttpJsonResponse(code, respBody)
+        } finally {
+            runCatching { conn.disconnect() }
+        }
+    }
+
     fun testConnection(cfg: AgentConfigStore.ModelConfig): TestResult {
         if (!cfg.hasApiKey) {
             return TestResult(ok = false, latencyMs = 0L, error = "请先填写 API Key")

@@ -36,6 +36,7 @@ internal object AgentLoopRunner {
             currentTalker = talker,
             allowedImagePaths = allowedImages,
             enabledTools = cfg.enabledTools,
+            allowGuestDrawImage = cfg.allowGuestDrawImage,
         )
         val toolsSchema = AgentToolRegistry.buildToolsSchema(policy)
         val inFlightToolMsgs = mutableListOf<JSONObject>()
@@ -272,7 +273,11 @@ internal object AgentLoopRunner {
             if (target.isNotEmpty()) "$act · $target" else act
         }
         "read", "write", "edit" -> args.optString("file_path", name)
+        "sendfile" -> args.optString("path", "sendfile").substringAfterLast('/')
         "readimage" -> args.optString("file_path", "readimage").substringAfterLast('/')
+        "websearch" -> args.optString("query", "").replace('\n', ' ').take(42)
+        "drawimage" -> args.optString("prompt", "").replace('\n', ' ').take(42)
+        "webfetch" -> args.optString("url", "").take(48)
         "bash" -> args.optString("command", "").replace('\n', ' ').take(48)
         else -> name
     }

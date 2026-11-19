@@ -17,6 +17,7 @@ object WeChatMessageFormatter {
     private val chatUsrTagRegex = tagRegex("chatusr")
     private val fromUsrTagRegex = tagRegex("fromusr")
     private val contentTagRegex = tagRegex("content")
+    private val urlTagRegex = tagRegex("url")
 
     fun isTextOrAppMsgType(type: Int): Boolean =
         type == 1 || type == 49 || type == 822083633 || (type > 0 && (type and 0xFF) == 49)
@@ -135,8 +136,11 @@ object WeChatMessageFormatter {
         }
 
         val appType = extractGroup(typeTagRegex, beforeRefer)?.toIntOrNull() ?: 0
+        val url = extractGroup(urlTagRegex, beforeRefer)?.let(::unescapeXml)?.trim().orEmpty()
         return when {
             appType == 6 && title.isNotEmpty() -> "[文件: $title]"
+            title.isNotEmpty() && (url.startsWith("http://", true) || url.startsWith("https://", true)) ->
+                "[链接卡片: $title | $url]"
             title.isNotEmpty() -> title
             else -> "[卡片/链接消息]"
         }

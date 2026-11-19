@@ -51,14 +51,43 @@ object ReadImageTool : AgentTool {
         val rawPath = args.optString("file_path", "").trim()
         if (rawPath.isEmpty()) return ToolResult("Error: Missing 'file_path' for readimage.", true)
 
+        return encodeImageFile(rawPath, policy).fold(
+            onSuccess = { loaded ->
+                ToolResult(
+                    output = "Loaded image `${loaded.file.name}` (${loaded.origW}x${loaded.origH} -> ${loaded.finalW}x${loaded.finalH}, ${loaded.byteSize} bytes JPEG). Attached as image input for inspection.",
+                    isError = false,
+                    imageAttachment = ImageAttachment(
+                        dataUrl = loaded.dataUrl,
+                        displayPath = loaded.file.absolutePath,
+                        mimeType = "image/jpeg",
+                    ),
+                )
+            },
+            onFailure = { err ->
+                ToolResult("Error: ${err.message ?: "readimage failed"}", true)
+            },
+        )
+    }
+
+    internal data class EncodedImageResult(
+        val file: File,
+        val dataUrl: String,
+        val origW: Int,
+        val origH: Int,
+        val finalW: Int,
+        val finalH: Int,
+        val byteSize: Int,
+    )
+
+    internal fun encodeImageFile(rawPath: String, policy: ToolPolicy): Result<EncodedImageResult> {
         val resolvedFile = resolvePermittedFile(rawPath, policy)
-            ?: return ToolResult("Error: Access denied for image path '$rawPath'.", true)
+            ?: return Result.failure(IllegalArgumentException("Access denied for image path '$rawPath'."))
 
         if (!resolvedFile.exists() || !resolvedFile.isFile || !resolvedFile.canRead()) {
-            return ToolResult("Error: Image file not found or unreadable: ${resolvedFile.absolutePath}", true)
+            return Result.failure(IllegalArgumentException("Image file not found or unreadable: ${resolvedFile.absolutePath}"))
         }
         if (resolvedFile.length() <= 0L || resolvedFile.length() > MAX_FILE_BYTES) {
-            return ToolResult("Error: Invalid or oversized image file (${resolvedFile.length()} bytes).", true)
+            return Result.failure(IllegalArgumentException("Invalid or oversized image file (${resolvedFile.length()} bytes)."))
         }
 
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -66,7 +95,7 @@ object ReadImageTool : AgentTool {
         val origW = bounds.outWidth
         val origH = bounds.outHeight
         if (origW <= 0 || origH <= 0) {
-            return ToolResult("Error: File is not a supported decoded image format: ${resolvedFile.name}", true)
+            return Result.failure(IllegalArgumentException("File is not a supported decoded image format: ${resolvedFile.name}"))
         }
 
         var decoded: Bitmap? = null
@@ -76,7 +105,7 @@ object ReadImageTool : AgentTool {
                 inSampleSize = computeSampleSize(origW, origH, MAX_DIMENSION_PX)
             }
             decoded = BitmapFactory.decodeFile(resolvedFile.absolutePath, opts)
-                ?: return ToolResult("Error: Failed decoding bitmap: ${resolvedFile.name}", true)
+                ?: return Result.failure(IllegalStateException("Failed decoding bitmap: ${resolvedFile.name}"))
 
             val bitmapToEncode = scaleIfNeeded(decoded, MAX_DIMENSION_PX).also {
                 if (it !== decoded) scaled = it
@@ -88,19 +117,19 @@ object ReadImageTool : AgentTool {
             bitmapToEncode.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, baos)
             val jpegBytes = baos.toByteArray()
             val b64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
-            val dataUrl = "data:image/jpeg;base64,$b64"
-
-            ToolResult(
-                output = "Loaded image `${resolvedFile.name}` (${origW}x${origH} -> ${finalW}x${finalH}, ${jpegBytes.size} bytes JPEG). Attached as image input for inspection.",
-                isError = false,
-                imageAttachment = ImageAttachment(
-                    dataUrl = dataUrl,
-                    displayPath = resolvedFile.absolutePath,
-                    mimeType = "image/jpeg",
+            Result.success(
+                EncodedImageResult(
+                    file = resolvedFile,
+                    dataUrl = "data:image/jpeg;base64,$b64",
+                    origW = origW,
+                    origH = origH,
+                    finalW = finalW,
+                    finalH = finalH,
+                    byteSize = jpegBytes.size,
                 ),
             )
         } catch (t: Throwable) {
-            ToolResult("Error: readimage failed: ${t.message ?: t.javaClass.simpleName}", true)
+            Result.failure(t)
         } finally {
             runCatching { scaled?.recycle() }
             runCatching { decoded?.recycle() }

@@ -16,6 +16,7 @@ import android.webkit.WebView
 import android.widget.Toast
 import com.acid.wechat.agent.AcidLlmClient
 import com.acid.wechat.agent.AgentConfigStore
+import com.acid.wechat.core.AcidIo
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.core.ConfigSchema
 import com.acid.wechat.core.ConfigStore
@@ -143,6 +144,29 @@ object SettingsDialog {
                     }
                 }
             }, "AcidModelTest").apply { isDaemon = true; start() }
+        }
+
+        @JavascriptInterface
+        fun cleanAgentWorkspace(): String {
+            val res = AgentConfigStore.cleanWorkspace()
+            val freedText = AcidIo.formatBytes(res.freedBytes)
+            AcidLogger.i(TAG, "cleaned agent workspace: ${res.deletedFiles} files, $freedText")
+            val stats = AcidIo.computeDirStats(AgentConfigStore.workspaceDir())
+            val remainSize = AcidIo.formatBytes(stats.totalBytes)
+            activity.runOnUiThread {
+                Toast.makeText(
+                    activity,
+                    "已清理工作区（删除 ${res.deletedFiles} 个文件，释放 $freedText）",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            }
+            return JSONObject().apply {
+                put("ok", true)
+                put("deletedFiles", res.deletedFiles)
+                put("freedSize", freedText)
+                put("workspaceFiles", stats.fileCount)
+                put("workspaceSize", remainSize)
+            }.toString()
         }
 
         @JavascriptInterface

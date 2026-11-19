@@ -177,6 +177,21 @@
   .row.disabled:active {
     background: var(--surface);
   }
+  .row.sub-row {
+    padding: 11px 16px 11px 32px;
+    min-height: 44px;
+    background: #FAFBFD;
+  }
+  .row.sub-row:active {
+    background: #F3F5F8;
+  }
+  .row.sub-row.disabled:active {
+    background: #FAFBFD;
+  }
+  .row.sub-row .row-label {
+    font-size: 13.5px;
+    font-weight: 500;
+  }
   .row-label {
     font-size: 14.5px;
     font-weight: 500;
@@ -304,19 +319,92 @@
     word-break: break-all;
     margin-bottom: 14px;
   }
+  .agent-actions {
+    display: flex;
+    gap: 10px;
+  }
   .agent-btn {
-    width: 100%;
+    flex: 1;
     border: none;
     background: var(--accent);
     color: #FFFFFF;
-    font-size: 14.5px;
+    font-size: 13.5px;
     font-weight: 600;
-    padding: 12px 16px;
+    padding: 11px 12px;
     border-radius: 12px;
     cursor: pointer;
+    text-align: center;
+  }
+  .agent-btn.secondary {
+    background: #F9FAFB;
+    color: #374151;
+    border: 1px solid #E5E7EB;
   }
   .agent-btn:active {
-    opacity: 0.9;
+    opacity: 0.88;
+  }
+  .ws-stat-tag {
+    color: #4B5563;
+    font-weight: 500;
+  }
+  .confirm-mask {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(17, 24, 39, 0.42);
+    z-index: 999;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .confirm-mask.open {
+    display: flex;
+  }
+  .confirm-card {
+    width: 100%;
+    max-width: 320px;
+    background: var(--surface);
+    border-radius: 14px;
+    padding: 16px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+    border: 1px solid var(--line);
+  }
+  .confirm-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 8px;
+  }
+  .confirm-desc {
+    font-size: 12.5px;
+    color: var(--muted);
+    line-height: 1.55;
+    margin-bottom: 14px;
+  }
+  .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .confirm-cancel {
+    border: 1px solid var(--line);
+    background: #F9FAFB;
+    color: #374151;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 7px 14px;
+    border-radius: 9px;
+    cursor: pointer;
+  }
+  .confirm-ok {
+    border: none;
+    background: #DC2626;
+    color: #FFFFFF;
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 7px 14px;
+    border-radius: 9px;
+    cursor: pointer;
   }
   .row.row-col {
     flex-direction: column;
@@ -427,6 +515,17 @@
     color: var(--muted);
     line-height: 1.45;
   }
+  .sub-section-tag {
+    display: inline-block;
+    font-size: 11.5px;
+    font-weight: 700;
+    color: #06A853;
+    background: #EAF9F0;
+    padding: 3px 9px;
+    border-radius: 999px;
+    align-self: flex-start;
+    margin-bottom: 2px;
+  }
   .test-btn {
     width: 100%;
     border: 1px solid #D1FAE5;
@@ -480,6 +579,17 @@
     <div class="tabs" id="tabs"></div>
   </div>
   <div class="content" id="content"></div>
+</div>
+
+<div class="confirm-mask" id="wsConfirmMask" onclick="onWsConfirmMaskClick(event)">
+  <div class="confirm-card">
+    <div class="confirm-title">清理工作区垃圾？</div>
+    <div class="confirm-desc" id="wsConfirmDesc"></div>
+    <div class="confirm-actions">
+      <button class="confirm-cancel" type="button" onclick="closeWsConfirm()">取消</button>
+      <button class="confirm-ok" type="button" onclick="runCleanWorkspace()">确认清理</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -577,9 +687,29 @@
     { value: "medium", label: "中" },
     { value: "high", label: "高" }
   ];
-  let apiKeyVisible = false;
+  const secretVisState = {};
   let testingConn = false;
   let lastTestResult = null;
+
+  function renderSecretFieldRow(label, inputId, btnId, field, value, placeholder) {
+    const shown = !!secretVisState[inputId];
+    return `
+      <div class="row row-col">
+        <div class="row-label">${escapeHtml(label)}</div>
+        <div class="input-wrap">
+          <input
+            class="field-input"
+            id="${escapeAttr(inputId)}"
+            type="${shown ? "text" : "password"}"
+            value="${escapeHtml(value || "")}"
+            placeholder="${escapeHtml(placeholder || "")}"
+            oninput="onAgentFieldInput('${escapeAttr(field)}', this.value)"
+          />
+          <button class="inline-btn" id="${escapeAttr(btnId)}" type="button" onclick="toggleSecretVis('${escapeAttr(inputId)}', '${escapeAttr(btnId)}')">${shown ? "隐藏" : "显示"}</button>
+        </div>
+      </div>
+    `;
+  }
 
   function renderGroupCard(catId, groupTitle, bodyHtml) {
     const expanded = isGroupExpanded(catId, groupTitle);
@@ -596,10 +726,20 @@
     `;
   }
 
+  function isAgentToolConfigured(toolName) {
+    const ag = state.agent || {};
+    if (toolName === "websearch") return !!String(ag.webSearchBaseUrl || "").trim();
+    if (toolName === "drawimage") return !!String(ag.imageBaseUrl || "").trim();
+    if (toolName === "webfetch") return !!String(ag.webFetchBaseUrl || "").trim();
+    return true;
+  }
+
   function enabledToolList() {
     const ag = state.agent || {};
-    if (Array.isArray(ag.enabledTools)) return ag.enabledTools;
-    return toolCatalogList().map(t => t.name);
+    const list = Array.isArray(ag.enabledTools)
+      ? ag.enabledTools
+      : ["wechat", "sendfile", "readimage", "read", "write", "edit", "bash"];
+    return list.filter(name => isAgentToolConfigured(name));
   }
 
   function formatToolsSummary(tools) {
@@ -645,10 +785,13 @@
         </div>
         <div class="agent-meta">
           已开启工具：<span id="agent-tools-summary">${escapeHtml(formatToolsSummary(tools))}</span><br/>
-          工作区：${escapeHtml(ag.workspace || "")}<br/>
+          工作区：${escapeHtml(ag.workspace || "")} <span class="ws-stat-tag" id="agent-ws-stats">(${ag.workspaceFiles || 0} 个文件 · ${escapeHtml(ag.workspaceSize || "0 B")})</span><br/>
           配置文件：${escapeHtml(ag.modelsFile || "")}
         </div>
-        <button class="agent-btn" onclick="openAgent()">打开全局 AI 助手</button>
+        <div class="agent-actions">
+          <button class="agent-btn" type="button" onclick="openAgent()">打开全局 AI 助手</button>
+          <button class="agent-btn secondary" type="button" onclick="openCleanWsConfirm()">清理工作区垃圾</button>
+        </div>
       </div>
     `;
 
@@ -665,20 +808,7 @@
           onblur="onAgentUrlOrModelBlur(this, 'baseUrl', 'https://api.deepseek.com/v1')"
         />
       </div>
-      <div class="row row-col">
-        <div class="row-label">API Key</div>
-        <div class="input-wrap">
-          <input
-            class="field-input"
-            id="agent-apikey-input"
-            type="${apiKeyVisible ? "text" : "password"}"
-            value="${escapeHtml(ag.apiKey || "")}"
-            placeholder="sk-..."
-            oninput="onAgentFieldInput('apiKey', this.value)"
-          />
-          <button class="inline-btn" id="agent-apikey-vis-btn" type="button" onclick="toggleApiKeyVis()">${apiKeyVisible ? "隐藏" : "显示"}</button>
-        </div>
-      </div>
+      ${renderSecretFieldRow("API Key", "agent-apikey-input", "agent-apikey-vis-btn", "apiKey", ag.apiKey || "", "sk-...")}
       <div class="row row-col">
         <div class="row-label">模型名称 (Model)</div>
         <input
@@ -741,6 +871,74 @@
     `;
     html += renderGroupCard("home", "模型与接口", modelCardBody);
 
+    const toolEndpointsBody = `
+      <div class="row row-col">
+        <span class="sub-section-tag">联网搜索 (websearch)</span>
+        <div class="row-label">搜索接口 (URL)</div>
+        <input
+          class="field-input"
+          id="agent-ws-baseurl-input"
+          type="text"
+          value="${escapeHtml(ag.webSearchBaseUrl || "")}"
+          placeholder="必填，如 https://api.deepseek.com/v1"
+          oninput="onAgentFieldInput('webSearchBaseUrl', this.value)"
+        />
+      </div>
+      ${renderSecretFieldRow("搜索 Key", "agent-ws-key-input", "agent-ws-key-vis-btn", "webSearchApiKey", ag.webSearchApiKey || "", "选填，Bearer Key")}
+      <div class="row row-col">
+        <div class="row-label">搜索模型 (选填)</div>
+        <input
+          class="field-input"
+          id="agent-ws-model-input"
+          type="text"
+          value="${escapeHtml(ag.webSearchModel || "")}"
+          placeholder="DeepSeek官方留空，CPA填 gemini-3-flash"
+          oninput="onAgentFieldInput('webSearchModel', this.value)"
+        />
+      </div>
+
+      <div class="row row-col">
+        <span class="sub-section-tag">AI 画图/改图 (drawimage)</span>
+        <div class="row-label">画图接口 (URL)</div>
+        <input
+          class="field-input"
+          id="agent-img-baseurl-input"
+          type="text"
+          value="${escapeHtml(ag.imageBaseUrl || "")}"
+          placeholder="必填，OpenAI 兼容接口"
+          oninput="onAgentFieldInput('imageBaseUrl', this.value)"
+        />
+      </div>
+      ${renderSecretFieldRow("画图 Key", "agent-img-key-input", "agent-img-key-vis-btn", "imageApiKey", ag.imageApiKey || "", "选填，Bearer Key")}
+      <div class="row row-col">
+        <div class="row-label">画图模型</div>
+        <input
+          class="field-input"
+          id="agent-img-model-input"
+          type="text"
+          value="${escapeHtml(ag.imageModel || "gemini-3.1-flash-image")}"
+          placeholder="如 gemini-3.1-flash-image"
+          oninput="onAgentFieldInput('imageModel', this.value)"
+          onblur="onAgentUrlOrModelBlur(this, 'imageModel', 'gemini-3.1-flash-image')"
+        />
+      </div>
+
+      <div class="row row-col">
+        <span class="sub-section-tag">网页链接读取 (webfetch)</span>
+        <div class="row-label">抓取接口 (URL)</div>
+        <input
+          class="field-input"
+          id="agent-wf-baseurl-input"
+          type="text"
+          value="${escapeHtml(ag.webFetchBaseUrl || "")}"
+          placeholder="必填，如 https://api.deepseek.com/v1 或 https://r.jina.ai/"
+          oninput="onAgentFieldInput('webFetchBaseUrl', this.value)"
+        />
+      </div>
+      ${renderSecretFieldRow("抓取 Key (选填)", "agent-wf-key-input", "agent-wf-key-vis-btn", "webFetchApiKey", ag.webFetchApiKey || "", "选填，Bearer Key")}
+    `;
+    html += renderGroupCard("home", "工具专属接口 (搜索 / 画图 / 网页)", toolEndpointsBody);
+
     const panelPrompt = ag.panelSystemPrompt || ag.defaultPanelSystemPrompt || "";
     const autoReplyPrompt = ag.autoReplySystemPrompt || ag.defaultAutoReplySystemPrompt || "";
     const promptCardBody = `
@@ -757,7 +955,7 @@
           oninput="onAgentFieldInput('panelSystemPrompt', this.value)"
           onblur="onPromptBlur(this, 'panelSystemPrompt', 'defaultPanelSystemPrompt', 'agent-panel-prompt')"
         >${escapeHtml(panelPrompt)}</textarea>
-        <div class="helper-text">机主在全局 AI 浮窗或单聊/群聊右上角 AI 面板提问时使用。</div>
+        <div class="helper-text">全局浮窗与聊天 AI 面板使用。</div>
       </div>
       <div class="row row-col">
         <div class="row-head">
@@ -772,22 +970,36 @@
           oninput="onAgentFieldInput('autoReplySystemPrompt', this.value)"
           onblur="onPromptBlur(this, 'autoReplySystemPrompt', 'defaultAutoReplySystemPrompt', 'agent-autoreply-prompt')"
         >${escapeHtml(autoReplyPrompt)}</textarea>
-        <div class="helper-text">群聊被 @我/@ai 或私聊收到 @ai 自动回微信消息时使用。</div>
+        <div class="helper-text">被 @ 自动回复微信消息时使用。</div>
       </div>
     `;
     html += renderGroupCard("home", "系统提示词", promptCardBody);
 
     const toolsCardBody = toolCatalogList().map(tool => {
-      const enabled = tools.includes(tool.name);
-      return `
-        <div class="row" onclick="toggleAgentTool('${escapeAttr(tool.name)}')">
+      const configured = isAgentToolConfigured(tool.name);
+      const enabled = configured && tools.includes(tool.name);
+      const descText = configured ? tool.desc : (tool.desc + "（需先填接口）");
+      let rowHtml = `
+        <div class="row ${configured ? "" : "disabled"}" id="tool-row-${escapeAttr(tool.name)}" onclick="toggleAgentTool('${escapeAttr(tool.name)}')">
           <div class="row-main">
             <div class="row-label">${escapeHtml(tool.title)}</div>
-            <div class="row-sub">${escapeHtml(tool.desc)}</div>
+            <div class="row-sub" id="tool-sub-${escapeAttr(tool.name)}">${escapeHtml(descText)}</div>
           </div>
           <div class="switch ${enabled ? "on" : ""}" id="tool-switch-${escapeAttr(tool.name)}"></div>
         </div>
       `;
+      if (tool.name === "drawimage") {
+        rowHtml += `
+          <div class="row sub-row ${enabled ? "" : "disabled"}" id="tool-guest-draw-row" onclick="toggleGuestDrawImage()">
+            <div class="row-main">
+              <div class="row-label">允许他人使用画图</div>
+              <div class="row-sub">关闭时仅机主可用，他人 @ai 不可生图</div>
+            </div>
+            <div class="switch ${enabled && ag.allowGuestDrawImage ? "on" : ""}" id="tool-guest-draw-switch"></div>
+          </div>
+        `;
+      }
+      return rowHtml;
     }).join("");
     html += renderGroupCard("home", "开启的工具", toolsCardBody);
 
@@ -859,6 +1071,25 @@
     el.innerHTML = html;
   }
 
+  function syncAgentToolRows() {
+    const latestTools = enabledToolList();
+    for (const tool of toolCatalogList()) {
+      const configured = isAgentToolConfigured(tool.name);
+      const on = configured && latestTools.includes(tool.name);
+      const row = document.getElementById("tool-row-" + tool.name);
+      if (row) row.classList.toggle("disabled", !configured);
+      const sub = document.getElementById("tool-sub-" + tool.name);
+      if (sub) sub.textContent = configured ? tool.desc : (tool.desc + "（需先填接口）");
+      const sw = document.getElementById("tool-switch-" + tool.name);
+      if (sw) sw.classList.toggle("on", on);
+    }
+    const drawEnabled = isAgentToolConfigured("drawimage") && latestTools.includes("drawimage");
+    const guestDrawRow = document.getElementById("tool-guest-draw-row");
+    if (guestDrawRow) guestDrawRow.classList.toggle("disabled", !drawEnabled);
+    const guestDrawSw = document.getElementById("tool-guest-draw-switch");
+    if (guestDrawSw) guestDrawSw.classList.toggle("on", drawEnabled && !!(state.agent && state.agent.allowGuestDrawImage));
+  }
+
   function patchAgentConfig(patch) {
     try {
       const raw = window.AcidBridge.updateAgentConfig(JSON.stringify(patch));
@@ -867,9 +1098,11 @@
       state.agent.hasApiKey = !!updated.hasApiKey;
       state.agent.enabledTools = updated.enabledTools;
       state.agent.reasoningEffort = updated.reasoningEffort;
+      if (typeof updated.allowGuestDrawImage === "boolean") state.agent.allowGuestDrawImage = updated.allowGuestDrawImage;
       if (typeof updated.autoCompactTokens === "number") state.agent.autoCompactTokens = updated.autoCompactTokens;
       if (Array.isArray(updated.toolCatalog)) state.agent.toolCatalog = updated.toolCatalog;
       updateAgentBadgeAndSummary();
+      syncAgentToolRows();
       return updated;
     } catch (_) {
       return null;
@@ -891,12 +1124,13 @@
     }
   }
 
-  function toggleApiKeyVis() {
-    apiKeyVisible = !apiKeyVisible;
-    const inp = document.getElementById("agent-apikey-input");
-    const btn = document.getElementById("agent-apikey-vis-btn");
-    if (inp) inp.type = apiKeyVisible ? "text" : "password";
-    if (btn) btn.textContent = apiKeyVisible ? "隐藏" : "显示";
+  function toggleSecretVis(inputId, btnId) {
+    const next = !secretVisState[inputId];
+    secretVisState[inputId] = next;
+    const inp = document.getElementById(inputId);
+    const btn = document.getElementById(btnId);
+    if (inp) inp.type = next ? "text" : "password";
+    if (btn) btn.textContent = next ? "隐藏" : "显示";
   }
 
   function setReasoningEffort(level) {
@@ -988,15 +1222,24 @@
   }
 
   function toggleAgentTool(toolName) {
+    if (!isAgentToolConfigured(toolName)) {
+      syncAgentToolRows();
+      return;
+    }
     const cur = enabledToolList();
     const next = !cur.includes(toolName);
-    const updated = patchAgentConfig({ toggleTool: toolName, enabled: next });
-    const latestTools = updated && Array.isArray(updated.enabledTools) ? updated.enabledTools : cur;
-    for (const tool of toolCatalogList()) {
-      const sw = document.getElementById("tool-switch-" + tool.name);
-      if (sw) sw.classList.toggle("on", latestTools.includes(tool.name));
+    patchAgentConfig({ toggleTool: toolName, enabled: next });
+    syncAgentToolRows();
+  }
+
+  function toggleGuestDrawImage() {
+    if (!isAgentToolConfigured("drawimage") || !enabledToolList().includes("drawimage")) {
+      syncAgentToolRows();
+      return;
     }
-    updateAgentBadgeAndSummary();
+    const next = !(state.agent && state.agent.allowGuestDrawImage);
+    patchAgentConfig({ allowGuestDrawImage: next });
+    syncAgentToolRows();
   }
 
   function refreshAgentIfIdle() {
@@ -1073,6 +1316,41 @@
 
   function openAgent() {
     try { window.AcidBridge.openAgent(); } catch (_) {}
+  }
+
+  function openCleanWsConfirm() {
+    const ag = state.agent || {};
+    const files = ag.workspaceFiles || 0;
+    const size = ag.workspaceSize || "0 B";
+    const desc = document.getElementById("wsConfirmDesc");
+    if (desc) {
+      desc.textContent = `将清空 AcidWeChat/workspace/（含 guest 沙盒目录）下的所有临时文件与脚本（当前共 ${files} 个文件，占用 ${size}），不影响聊天上下文记忆、模型设置与模块配置。`;
+    }
+    const mask = document.getElementById("wsConfirmMask");
+    if (mask) mask.classList.add("open");
+  }
+
+  function closeWsConfirm() {
+    const mask = document.getElementById("wsConfirmMask");
+    if (mask) mask.classList.remove("open");
+  }
+
+  function onWsConfirmMaskClick(ev) {
+    if (ev.target && ev.target.id === "wsConfirmMask") closeWsConfirm();
+  }
+
+  function runCleanWorkspace() {
+    closeWsConfirm();
+    try {
+      const res = JSON.parse(window.AcidBridge.cleanAgentWorkspace());
+      if (!state.agent) state.agent = {};
+      state.agent.workspaceFiles = res.workspaceFiles || 0;
+      state.agent.workspaceSize = res.workspaceSize || "0 B";
+      const statsEl = document.getElementById("agent-ws-stats");
+      if (statsEl) {
+        statsEl.textContent = `(${state.agent.workspaceFiles} 个文件 · ${state.agent.workspaceSize})`;
+      }
+    } catch (_) {}
   }
 
   function escapeHtml(s) {

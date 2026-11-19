@@ -22,8 +22,10 @@ object AgentConfigStore {
     const val DEFAULT_TEMP = 0.2
     const val DEFAULT_MAX_STEPS = 40
     const val DEFAULT_AUTO_COMPACT_TOKENS = 72_000
+    const val DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image"
 
     val ALL_TOOL_NAMES: List<String> get() = AgentToolRegistry.allToolNames()
+    val DEFAULT_ENABLED_TOOLS: Set<String> = setOf("wechat", "sendfile", "readimage", "read", "write", "edit", "bash")
     val VALID_REASONING_EFFORTS: Set<String> = setOf("default", "low", "medium", "high")
 
     val DEFAULT_PANEL_SYSTEM_PROMPT: String = """
@@ -49,9 +51,25 @@ object AgentConfigStore {
         val reasoningEffort: String = "default",
         val panelSystemPrompt: String = DEFAULT_PANEL_SYSTEM_PROMPT,
         val autoReplySystemPrompt: String = DEFAULT_AUTO_REPLY_SYSTEM_PROMPT,
-        val enabledTools: Set<String> = ALL_TOOL_NAMES.toSet(),
+        val enabledTools: Set<String> = DEFAULT_ENABLED_TOOLS,
+        val webSearchBaseUrl: String = "",
+        val webSearchApiKey: String = "",
+        val webSearchModel: String = "",
+        val imageBaseUrl: String = "",
+        val imageApiKey: String = "",
+        val imageModel: String = DEFAULT_IMAGE_MODEL,
+        val webFetchBaseUrl: String = "",
+        val webFetchApiKey: String = "",
+        val allowGuestDrawImage: Boolean = false,
     ) {
         val hasApiKey: Boolean get() = apiKey.isNotBlank() || isLoopbackBaseUrl(baseUrl)
+
+        fun isToolConfigured(toolName: String): Boolean = when (toolName.trim().lowercase()) {
+            "websearch" -> webSearchBaseUrl.isNotBlank()
+            "drawimage" -> imageBaseUrl.isNotBlank()
+            "webfetch" -> webFetchBaseUrl.isNotBlank()
+            else -> true
+        }
     }
 
     fun sanitizeAutoCompactTokens(raw: Int): Int =
@@ -67,7 +85,7 @@ object AgentConfigStore {
         ALL_TOOL_NAMES.filterTo(LinkedHashSet()) { it in rawSet }
 
     private fun parseEnabledTools(arr: JSONArray?): Set<String> {
-        if (arr == null) return ALL_TOOL_NAMES.toSet()
+        if (arr == null) return DEFAULT_ENABLED_TOOLS
         val picked = HashSet<String>(arr.length())
         for (i in 0 until arr.length()) {
             val name = arr.optString(i, "").trim()
@@ -76,7 +94,12 @@ object AgentConfigStore {
         return canonicalTools(picked)
     }
 
-    private fun isLoopbackBaseUrl(url: String): Boolean {
+    private fun sanitizeConfig(cfg: ModelConfig): ModelConfig {
+        val filtered = canonicalTools(cfg.enabledTools.filterTo(LinkedHashSet()) { cfg.isToolConfigured(it) })
+        return if (filtered == cfg.enabledTools) cfg else cfg.copy(enabledTools = filtered)
+    }
+
+    fun isLoopbackBaseUrl(url: String): Boolean {
         val lower = url.trim().lowercase()
         return lower.startsWith("http://127.0.0.1") ||
             lower.startsWith("http://localhost") ||
@@ -192,6 +215,33 @@ object AgentConfigStore {
                     ?: patch.optInt("autoCompactTokens", DEFAULT_AUTO_COMPACT_TOKENS)
                 next = next.copy(autoCompactTokens = sanitizeAutoCompactTokens(parsed))
             }
+            if (patch.has("webSearchBaseUrl")) {
+                next = next.copy(webSearchBaseUrl = patch.optString("webSearchBaseUrl", "").trim())
+            }
+            if (patch.has("webSearchApiKey")) {
+                next = next.copy(webSearchApiKey = patch.optString("webSearchApiKey", "").trim())
+            }
+            if (patch.has("webSearchModel")) {
+                next = next.copy(webSearchModel = patch.optString("webSearchModel", "").trim())
+            }
+            if (patch.has("imageBaseUrl")) {
+                next = next.copy(imageBaseUrl = patch.optString("imageBaseUrl", "").trim())
+            }
+            if (patch.has("imageApiKey")) {
+                next = next.copy(imageApiKey = patch.optString("imageApiKey", "").trim())
+            }
+            if (patch.has("imageModel")) {
+                next = next.copy(imageModel = patch.optString("imageModel", "").trim().ifEmpty { DEFAULT_IMAGE_MODEL })
+            }
+            if (patch.has("webFetchBaseUrl")) {
+                next = next.copy(webFetchBaseUrl = patch.optString("webFetchBaseUrl", "").trim())
+            }
+            if (patch.has("webFetchApiKey")) {
+                next = next.copy(webFetchApiKey = patch.optString("webFetchApiKey", "").trim())
+            }
+            if (patch.has("allowGuestDrawImage")) {
+                next = next.copy(allowGuestDrawImage = patch.optBoolean("allowGuestDrawImage", false))
+            }
             patch.optJSONArray("enabledTools")?.let { arr ->
                 next = next.copy(enabledTools = parseEnabledTools(arr))
             }
@@ -200,16 +250,20 @@ object AgentConfigStore {
                 val enabled = patch.optBoolean("enabled", true)
                 if (tool in ALL_TOOL_NAMES) {
                     val updatedSet = next.enabledTools.toMutableSet()
-                    if (enabled) updatedSet += tool else updatedSet -= tool
+                    if (enabled && next.isToolConfigured(tool)) updatedSet += tool else updatedSet -= tool
                     next = next.copy(enabledTools = canonicalTools(updatedSet))
                 }
             }
-            saveLocked(next)
+            saveLocked(sanitizeConfig(next))
             return cached
         }
     }
 
+    fun cleanWorkspace(): AcidIo.CleanResult = AcidIo.cleanDirContents(workspaceDir())
+
     fun toUiJson(cfg: ModelConfig = getConfig()): JSONObject = JSONObject().apply {
+        val ws = workspaceDir()
+        val wsStats = AcidIo.computeDirStats(ws)
         put("baseUrl", cfg.baseUrl)
         put("apiKey", cfg.apiKey)
         put("model", cfg.model)
@@ -221,8 +275,19 @@ object AgentConfigStore {
         put("autoReplySystemPrompt", cfg.autoReplySystemPrompt.ifBlank { DEFAULT_AUTO_REPLY_SYSTEM_PROMPT })
         put("defaultAutoReplySystemPrompt", DEFAULT_AUTO_REPLY_SYSTEM_PROMPT)
         put("enabledTools", JSONArray(ALL_TOOL_NAMES.filter { it in cfg.enabledTools }))
+        put("allowGuestDrawImage", cfg.allowGuestDrawImage)
         put("toolCatalog", AgentToolRegistry.catalogJson())
-        put("workspace", workspaceDir().absolutePath)
+        put("webSearchBaseUrl", cfg.webSearchBaseUrl)
+        put("webSearchApiKey", cfg.webSearchApiKey)
+        put("webSearchModel", cfg.webSearchModel)
+        put("imageBaseUrl", cfg.imageBaseUrl)
+        put("imageApiKey", cfg.imageApiKey)
+        put("imageModel", cfg.imageModel)
+        put("webFetchBaseUrl", cfg.webFetchBaseUrl)
+        put("webFetchApiKey", cfg.webFetchApiKey)
+        put("workspace", ws.absolutePath)
+        put("workspaceFiles", wsStats.fileCount)
+        put("workspaceSize", AcidIo.formatBytes(wsStats.totalBytes))
         put("modelsFile", modelsFile().absolutePath)
     }
 
@@ -288,19 +353,30 @@ object AgentConfigStore {
             val tools = if (obj.has("enabled_tools") && !obj.isNull("enabled_tools")) {
                 parseEnabledTools(obj.optJSONArray("enabled_tools"))
             } else {
-                ALL_TOOL_NAMES.toSet()
+                DEFAULT_ENABLED_TOOLS
             }
-            cached = ModelConfig(
-                baseUrl = obj.optString("base_url", DEFAULT_BASE_URL).trim().ifEmpty { DEFAULT_BASE_URL },
-                apiKey = obj.optString("api_key", "").trim(),
-                model = obj.optString("model", DEFAULT_MODEL).trim().ifEmpty { DEFAULT_MODEL },
-                temperature = obj.optDouble("temperature", DEFAULT_TEMP).coerceIn(0.0, 2.0),
-                maxSteps = obj.optInt("max_steps", DEFAULT_MAX_STEPS).coerceIn(1, 200),
-                autoCompactTokens = sanitizeAutoCompactTokens(obj.optInt("auto_compact_tokens", DEFAULT_AUTO_COMPACT_TOKENS)),
-                reasoningEffort = normalizeReasoningEffort(obj.optString("reasoning_effort", "default")),
-                panelSystemPrompt = obj.optString("panel_system_prompt", DEFAULT_PANEL_SYSTEM_PROMPT).trim().ifEmpty { DEFAULT_PANEL_SYSTEM_PROMPT },
-                autoReplySystemPrompt = obj.optString("auto_reply_system_prompt", DEFAULT_AUTO_REPLY_SYSTEM_PROMPT).trim().ifEmpty { DEFAULT_AUTO_REPLY_SYSTEM_PROMPT },
-                enabledTools = tools,
+            cached = sanitizeConfig(
+                ModelConfig(
+                    baseUrl = obj.optString("base_url", DEFAULT_BASE_URL).trim().ifEmpty { DEFAULT_BASE_URL },
+                    apiKey = obj.optString("api_key", "").trim(),
+                    model = obj.optString("model", DEFAULT_MODEL).trim().ifEmpty { DEFAULT_MODEL },
+                    temperature = obj.optDouble("temperature", DEFAULT_TEMP).coerceIn(0.0, 2.0),
+                    maxSteps = obj.optInt("max_steps", DEFAULT_MAX_STEPS).coerceIn(1, 200),
+                    autoCompactTokens = sanitizeAutoCompactTokens(obj.optInt("auto_compact_tokens", DEFAULT_AUTO_COMPACT_TOKENS)),
+                    reasoningEffort = normalizeReasoningEffort(obj.optString("reasoning_effort", "default")),
+                    panelSystemPrompt = obj.optString("panel_system_prompt", DEFAULT_PANEL_SYSTEM_PROMPT).trim().ifEmpty { DEFAULT_PANEL_SYSTEM_PROMPT },
+                    autoReplySystemPrompt = obj.optString("auto_reply_system_prompt", DEFAULT_AUTO_REPLY_SYSTEM_PROMPT).trim().ifEmpty { DEFAULT_AUTO_REPLY_SYSTEM_PROMPT },
+                    enabledTools = tools,
+                    webSearchBaseUrl = obj.optString("web_search_base_url", "").trim(),
+                    webSearchApiKey = obj.optString("web_search_api_key", "").trim(),
+                    webSearchModel = obj.optString("web_search_model", "").trim(),
+                    imageBaseUrl = obj.optString("image_base_url", "").trim(),
+                    imageApiKey = obj.optString("image_api_key", "").trim(),
+                    imageModel = obj.optString("image_model", DEFAULT_IMAGE_MODEL).trim().ifEmpty { DEFAULT_IMAGE_MODEL },
+                    webFetchBaseUrl = obj.optString("web_fetch_base_url", "").trim(),
+                    webFetchApiKey = obj.optString("web_fetch_api_key", "").trim(),
+                    allowGuestDrawImage = obj.optBoolean("allow_guest_draw_image", false),
+                ),
             )
             lastMtime = f.lastModified()
             lastLen = f.length()
@@ -311,21 +387,31 @@ object AgentConfigStore {
 
     private fun saveLocked(cfg: ModelConfig) {
         runCatching {
+            val cleanCfg = sanitizeConfig(cfg)
             val obj = JSONObject().apply {
-                put("base_url", cfg.baseUrl)
-                put("api_key", cfg.apiKey)
-                put("model", cfg.model)
-                put("temperature", cfg.temperature)
-                put("max_steps", cfg.maxSteps)
-                put("auto_compact_tokens", cfg.autoCompactTokens)
-                put("reasoning_effort", cfg.reasoningEffort)
-                put("panel_system_prompt", cfg.panelSystemPrompt)
-                put("auto_reply_system_prompt", cfg.autoReplySystemPrompt)
-                put("enabled_tools", JSONArray(ALL_TOOL_NAMES.filter { it in cfg.enabledTools }))
+                put("base_url", cleanCfg.baseUrl)
+                put("api_key", cleanCfg.apiKey)
+                put("model", cleanCfg.model)
+                put("temperature", cleanCfg.temperature)
+                put("max_steps", cleanCfg.maxSteps)
+                put("auto_compact_tokens", cleanCfg.autoCompactTokens)
+                put("reasoning_effort", cleanCfg.reasoningEffort)
+                put("panel_system_prompt", cleanCfg.panelSystemPrompt)
+                put("auto_reply_system_prompt", cleanCfg.autoReplySystemPrompt)
+                put("enabled_tools", JSONArray(ALL_TOOL_NAMES.filter { it in cleanCfg.enabledTools }))
+                put("web_search_base_url", cleanCfg.webSearchBaseUrl)
+                put("web_search_api_key", cleanCfg.webSearchApiKey)
+                put("web_search_model", cleanCfg.webSearchModel)
+                put("image_base_url", cleanCfg.imageBaseUrl)
+                put("image_api_key", cleanCfg.imageApiKey)
+                put("image_model", cleanCfg.imageModel)
+                put("web_fetch_base_url", cleanCfg.webFetchBaseUrl)
+                put("web_fetch_api_key", cleanCfg.webFetchApiKey)
+                put("allow_guest_draw_image", cleanCfg.allowGuestDrawImage)
             }
             val f = modelsFile()
             AcidIo.writeAtomicUtf8(f, obj.toString(2))
-            cached = cfg
+            cached = cleanCfg
             lastMtime = f.lastModified()
             lastLen = f.length()
         }.onFailure {

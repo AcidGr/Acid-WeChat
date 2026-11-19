@@ -3,6 +3,7 @@ package com.acid.wechat.agent
 import com.acid.wechat.core.AcidLogger
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class ToolPolicy(
     val isAdmin: Boolean = true,
@@ -10,6 +11,8 @@ data class ToolPolicy(
     val allowSendMessage: Boolean = isAdmin && (currentTalker == null || currentTalker == AgentSessionModels.GLOBAL_TALKER),
     val allowedImagePaths: Set<String> = emptySet(),
     val enabledTools: Set<String> = AgentConfigStore.ALL_TOOL_NAMES.toSet(),
+    val allowGuestDrawImage: Boolean = false,
+    val drawImageUsedInTurn: AtomicBoolean = AtomicBoolean(false),
 )
 
 data class ImageAttachment(
@@ -42,6 +45,10 @@ object AgentToolRegistry {
 
     private val tools: Map<String, AgentTool> = linkedMapOf(
         WeChatAgentTool.name to WeChatAgentTool,
+        SendFileTool.name to SendFileTool,
+        WebSearchTool.name to WebSearchTool,
+        WebFetchTool.name to WebFetchTool,
+        DrawImageTool.name to DrawImageTool,
         ReadImageTool.name to ReadImageTool,
         SandboxFileTools.ReadTool.name to SandboxFileTools.ReadTool,
         SandboxFileTools.WriteTool.name to SandboxFileTools.WriteTool,
@@ -65,6 +72,7 @@ object AgentToolRegistry {
         for (tool in tools.values) {
             if (tool.name !in policy.enabledTools) continue
             if (!policy.isAdmin && tool.name == SandboxFileTools.BashTool.name) continue
+            if (!policy.isAdmin && tool.name == DrawImageTool.name && !policy.allowGuestDrawImage) continue
             put(tool.buildOpenAiSchema(policy))
         }
     }
@@ -75,6 +83,9 @@ object AgentToolRegistry {
         }
         if (!policy.isAdmin && name == SandboxFileTools.BashTool.name) {
             return ToolResult("Error: Tool 'bash' is disabled in guest sandbox mode.", true)
+        }
+        if (!policy.isAdmin && name == DrawImageTool.name && !policy.allowGuestDrawImage) {
+            return ToolResult("Error: Tool 'drawimage' is restricted to master only in AI settings.", true)
         }
         val tool = tools[name]
             ?: return ToolResult("Error: Unknown tool '$name'. Available: ${tools.keys.joinToString(", ")}", true)

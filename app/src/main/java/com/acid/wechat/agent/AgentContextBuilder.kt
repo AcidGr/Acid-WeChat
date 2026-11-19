@@ -110,24 +110,22 @@ object AgentContextBuilder {
                 "1. `wechat`: 查询模块状态、`search_contacts`、`list_chats`、`read_messages`、朋友圈伪点赞/评论、`config_patch`（已禁用 `send_message`）。"
             }
         }
-        val otherTools = listOf("read", "write", "edit", "bash", "readimage").filter { it in enabled }
+        val otherTools = listOf("sendfile", "websearch", "webfetch", "drawimage", "readimage", "read", "write", "edit", "bash")
+            .filter { it in enabled }
         if (otherTools.isNotEmpty()) {
             val prefix = if ("wechat" in enabled) "2. " else "1. "
             val toolList = otherTools.joinToString(" / ") { "`$it`" }
-            val extraDesc = buildString {
-                if (otherTools.any { it == "read" || it == "write" || it == "edit" }) {
-                    append("读写 `$wsPath`、`config.json`、`agent/models.json`")
-                }
-                if ("bash" in otherTools) {
-                    if (isNotEmpty()) append("、")
-                    append("执行本地命令")
-                }
-                if ("readimage" in otherTools) {
-                    if (isNotEmpty()) append("，以及")
-                    append("通过 `readimage(file_path)` 查看对话中 `[图片: 路径]` 的图片内容")
-                }
+            val parts = ArrayList<String>(4)
+            if (otherTools.any { it == "read" || it == "write" || it == "edit" }) {
+                parts += "读写 `$wsPath`、`config.json`、`agent/models.json`"
             }
-            lines += "$prefix$toolList: $extraDesc。"
+            if ("bash" in otherTools) parts += "执行本地命令"
+            if ("sendfile" in otherTools) parts += "用 `sendfile(path, talker?)` 向微信聊天发送图片或文件"
+            if ("readimage" in otherTools) parts += "用 `readimage(file_path)` 识别图片"
+            if ("websearch" in otherTools) parts += "用 `websearch(query)` 联网搜索"
+            if ("webfetch" in otherTools) parts += "用 `webfetch(url)` 读取链接卡片网页正文"
+            if ("drawimage" in otherTools) parts += "用 `drawimage(prompt, reference_image)` 生成或编辑图片（每轮限生图一次）"
+            lines += "$prefix$toolList: ${parts.joinToString("、")}。"
         }
         return if (lines.isEmpty()) "当前设置未开启任何工具，请直接结合上下文回答。" else lines.joinToString("\n")
     }
@@ -179,6 +177,11 @@ $toolsDesc$sendHint
                         """.trimIndent(),
                     )
                 } else {
+                    val sendFileHint = if ("sendfile" in enabled) {
+                        "\n- 若机主明确要求把生成的图片或文件直接发到微信聊天，可调用 `sendfile(path=...)` 发出。"
+                    } else {
+                        ""
+                    }
                     sb.append(
                         """
 面板助手（单会话专属面板） · 作用域：$chatScope。
@@ -187,7 +190,7 @@ $toolsDesc$sendHint
 - `[master(AI面板私聊·对方不可见) 时间]`：机主点开右上角 AI 面板私下发给你的话，**对方在微信里完全看不见**。
 - `[对方/群友名(聊天框) 时间]`：该私聊对方或群成员在微信聊天里发来的消息。
 - 你的历史回复前缀 `[已发到聊天框]` 与 `[仅面板私聊·未发到聊天框]` 用于区分是否已真正发进微信（你输出的回复正文严禁携带这些方括号标记）。
-- 权限边界：当前处于单聊/群聊专属面板，**`send_message` 工具已禁用**；你在这里的回答仅展示在面板里给机主看（不会自动发给群友或对方），如果机主想发出会自行点击「发到当前聊天」。
+- 权限边界：当前处于单聊/群聊专属面板，**`send_message` 工具已禁用**；你在这里的文本回答仅展示在面板里给机主看（不会自动发给群友或对方），如果机主想发出会自行点击「发到当前聊天」。$sendFileHint
 
 当前已开启工具（无 `send_message`）：
 $toolsDesc
@@ -199,7 +202,9 @@ $toolsDesc
 
             InvocationMode.CHAT_TRIGGER_MASTER, InvocationMode.CHAT_TRIGGER_GUEST -> {
                 val isAdmin = mode == InvocationMode.CHAT_TRIGGER_MASTER
-                val availableTools = enabled.filter { isAdmin || it != "bash" }
+                val availableTools = enabled.filter { tool ->
+                    isAdmin || (tool != "bash" && (tool != "drawimage" || cfg.allowGuestDrawImage))
+                }
                 val toolsLine = if (availableTools.isEmpty()) "无（已全部关闭）" else availableTools.joinToString(", ") { "`$it`" }
                 val permRule = if (isAdmin) {
                     "当前触发者为机主本人（`master`，管理员权限），当前已开启工具：$toolsLine（`send_message` 工具已禁用）。\n" +
@@ -218,10 +223,22 @@ $toolsDesc
                 } else {
                     "（当前未开启 `readimage` 工具）"
                 }
+                val sendFileHint = if ("sendfile" in availableTools) {
+                    "\n发图/发文件：当需要把生成的图片或工作区文件实际发出时，可调用 `sendfile(path=...)` 发送到当前聊天。"
+                } else {
+                    ""
+                }
+                val drawHint = when {
+                    "drawimage" in availableTools ->
+                        "\n画图限制：每轮对话最多只能调用一次 `drawimage` 生成一张图。"
+                    !isAdmin && "drawimage" in enabled && !cfg.allowGuestDrawImage ->
+                        "\n画图限制：画图工具当前仅限机主本人使用，外部成员不可调用。"
+                    else -> ""
+                }
                 sb.append(
                     """
 微信聊天自动回复模式 · 作用域：$chatScope。
-语音/媒体上下文：`[语音: ...]` 是自动转写出的语音正文；`[图片: /path/...]` 是微信本地图片路径，$imgHint
+语音/媒体上下文：`[语音: ...]` 是自动转写出的语音正文；`[图片: /path/...]` 是微信本地图片路径，$imgHint$sendFileHint$drawHint
 $permRule
                     """.trimIndent(),
                 )
