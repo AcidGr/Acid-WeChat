@@ -34,20 +34,23 @@
   .title-box { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 1; }
   .title {
     font-size: 14px; font-weight: 700; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; max-width: 120px;
+    overflow: hidden; text-overflow: ellipsis; max-width: 96px;
   }
   .model-pill {
     font-size: 10.5px; font-weight: 600; color: #06A853; background: var(--accent-soft);
     padding: 3px 8px; border-radius: 999px; border: none; cursor: pointer;
-    max-width: 105px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0;
+    max-width: 82px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0;
   }
   .model-pill.warn { color: #B45309; background: #FEF3C7; }
   .hdr-actions { display: flex; gap: 5px; flex-shrink: 0; }
   .hdr-btn {
     border: none; background: #F2F3F5; color: #374151; font-size: 11.5px; font-weight: 500;
-    padding: 5px 8px; border-radius: 999px; cursor: pointer; white-space: nowrap;
+    padding: 5px 7px; border-radius: 999px; cursor: pointer; white-space: nowrap;
   }
   .hdr-btn.gold { background: var(--gold-soft); color: #B45309; border: 1px solid #F59E0B; }
+  .hdr-btn.takeover-on {
+    background: var(--accent-soft); color: #06A853; border: 1px solid var(--accent); font-weight: 600;
+  }
   .toast-bar {
     display: none; padding: 6px 12px; font-size: 11.5px; background: #FFFBEB;
     color: #92400E; border-bottom: 1px solid #FDE68A; flex-shrink: 0;
@@ -216,6 +219,7 @@
   }
   .confirm-ok.gold { background: var(--gold); }
   .confirm-ok.danger { background: var(--danger); }
+  .confirm-ok.accent { background: var(--accent); }
 </style>
 </head>
 <body>
@@ -226,6 +230,7 @@
       <button class="model-pill" id="modelPill" onclick="toggleCfg()">加载中</button>
     </div>
     <div class="hdr-actions">
+      <button class="hdr-btn" id="takeoverBtn" style="display:none" onclick="onTakeoverClick()">接管</button>
       <button class="hdr-btn gold" id="compactBtn" onclick="onCompactClick()">压缩</button>
       <button class="hdr-btn" id="clearBtn" onclick="onClearClick()">清空</button>
       <button class="hdr-btn" onclick="closeDialog()">关闭</button>
@@ -279,6 +284,8 @@
 <script>
   let chatTitle = "Acid Agent";
   let isGlobal = false;
+  let isGroup = false;
+  let takeoverEnabled = false;
   let running = false;
   let compacting = false;
   let step = 0;
@@ -298,6 +305,8 @@
       const s = JSON.parse(window.AcidAgentBridge.getInitialState());
       chatTitle = s.title || "Acid Agent";
       isGlobal = !!s.isGlobal;
+      isGroup = !!s.isGroup;
+      takeoverEnabled = !!s.takeoverEnabled;
       running = !!s.running;
       step = s.step || 0;
       totalTokens = s.totalTokens || 0;
@@ -308,6 +317,7 @@
       items = s.items || [];
       cfg = s.config || {};
       document.getElementById("chatTitle").textContent = chatTitle;
+      renderTakeoverBtn();
       fillCfg();
       render(false);
     } catch (e) {
@@ -405,6 +415,43 @@
     const fn = pendingConfirmAction;
     closeConfirm();
     if (fn) fn();
+  }
+
+  function renderTakeoverBtn() {
+    const btn = document.getElementById("takeoverBtn");
+    if (!btn) return;
+    if (isGlobal) {
+      btn.style.display = "none";
+      return;
+    }
+    btn.style.display = "";
+    btn.textContent = takeoverEnabled ? "接管中" : "接管";
+    btn.classList.toggle("takeover-on", takeoverEnabled);
+  }
+
+  function applyTakeover(next) {
+    try {
+      const res = JSON.parse(window.AcidAgentBridge.setTakeover(!!next));
+      if (res.ok) {
+        takeoverEnabled = !!res.takeoverEnabled;
+        renderTakeoverBtn();
+        showToast(takeoverEnabled ? "已开启 AI 接管，退出面板即可见右上角绿标" : "已取消 AI 接管", 2400);
+      }
+    } catch (_) {}
+  }
+
+  function onTakeoverClick() {
+    if (isGlobal) return;
+    if (takeoverEnabled) {
+      applyTakeover(false);
+      return;
+    }
+    const desc = isGroup
+      ? "AI 将完全接管此群聊：他人 @我 时自动触发回复；连发消息时自动融入上下文，不打断当前推理。机主发言不受影响。"
+      : "AI 将完全接管此私聊：收到对方的每条文本或语音消息时自动回复（图片与动画表情不触发）；连发消息时自动融入上下文，不打断当前推理。";
+    openConfirm("开启 AI 全程接管？", desc, "确认接管", "accent", function() {
+      applyTakeover(true);
+    });
   }
 
   function onCompactClick() {

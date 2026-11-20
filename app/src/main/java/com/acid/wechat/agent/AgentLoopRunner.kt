@@ -1,14 +1,17 @@
 package com.acid.wechat.agent
 
+import com.acid.wechat.agent.AcidAgentLoop.PendingIncoming
 import com.acid.wechat.agent.AcidAgentLoop.RunState
 import com.acid.wechat.agent.AgentContextBuilder.InvocationMode
 import com.acid.wechat.agent.AgentSessionModels.TimelineItem
 import com.acid.wechat.agent.AgentSessionModels.formatBubbleTime
+import com.acid.wechat.agent.AgentSessionModels.formatContextTime
 import com.acid.wechat.agent.AgentSessionStore.ChatSessionState
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.wechat.WeChatSender
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Collections
 
 /**
  * Executes a single ReAct turn chain for one `talker`, streaming reasoning/reply chunks
@@ -16,6 +19,7 @@ import org.json.JSONObject
  */
 internal object AgentLoopRunner {
     private const val TAG = "AgentLoopRunner"
+    private const val MAX_FOLLOWUP_ROUNDS = 3
 
     fun execute(
         talker: String,
@@ -29,18 +33,20 @@ internal object AgentLoopRunner {
         notifyState: (String) -> Unit,
     ) {
         val isAdmin = mode != InvocationMode.CHAT_TRIGGER_GUEST
-        val (baseTitle, baseMemSummary, baseTimeline) = AgentSessionStore.snapshotForPrompt(talker)
-        val allowedImages = if (isAdmin) emptySet() else collectTimelineImagePaths(baseTimeline)
+        var snapshot = AgentSessionStore.snapshotForPrompt(talker)
+        val allowedImagesSet = Collections.synchronizedSet(LinkedHashSet<String>())
+        if (!isAdmin) allowedImagesSet.addAll(collectTimelineImagePaths(snapshot.third))
         val policy = ToolPolicy(
             isAdmin = isAdmin,
             currentTalker = talker,
-            allowedImagePaths = allowedImages,
+            allowedImagePaths = allowedImagesSet,
             enabledTools = cfg.enabledTools,
             allowGuestDrawImage = cfg.allowGuestDrawImage,
         )
         val toolsSchema = AgentToolRegistry.buildToolsSchema(policy)
         val inFlightToolMsgs = mutableListOf<JSONObject>()
         var finalReplyText = ""
+        var followUpRounds = 0
 
         try {
             for (step in 1..cfg.maxSteps) {
@@ -48,12 +54,24 @@ internal object AgentLoopRunner {
                 rs.currentStep = step
                 notifyState(talker)
 
+                if (step > 1 && inFlightToolMsgs.isNotEmpty()) {
+                    val drained = drainPendingIncoming(rs)
+                    if (drained.isNotEmpty()) {
+                        if (!isAdmin) {
+                            allowedImagesSet.addAll(
+                                collectTimelineImagePaths(AgentSessionStore.snapshotForPrompt(talker).third),
+                            )
+                        }
+                        appendPendingIncomingToInFlight(inFlightToolMsgs, formatPendingIncomingForLoop(drained, cfg))
+                    }
+                }
+
                 val reqMessages = AgentContextBuilder.buildMessages(
                     talker = talker,
-                    title = baseTitle,
+                    title = snapshot.first,
                     mode = mode,
-                    memorySummary = baseMemSummary,
-                    timeline = baseTimeline,
+                    memorySummary = snapshot.second,
+                    timeline = snapshot.third,
                     inFlightToolMessages = inFlightToolMsgs,
                     cfg = cfg,
                 )
@@ -90,8 +108,8 @@ internal object AgentLoopRunner {
                         },
                         onUsage = { pt, _, tt ->
                             synchronized(session) {
-                                // Only measure step-1 baseline conversation prompt tokens (excluding transient tool/image steps).
-                                if (step == 1 && pt > 0) session.lastPromptTokens = pt
+                                // Measure baseline conversation prompt tokens (excluding transient tool/image steps).
+                                if (inFlightToolMsgs.isEmpty() && pt > 0) session.lastPromptTokens = pt
                                 if (tt > 0) session.lastTotalTokens = tt
                             }
                             notifyState(talker)
@@ -131,6 +149,30 @@ internal object AgentLoopRunner {
                         replyItem?.chatVisible = false
                     }
                     notifyTimeline(talker)
+                    AgentSessionStore.persist(session)
+                    val shouldFollowUp = synchronized(rs.stateLock) {
+                        val canFollowUp = rs.pendingIncoming.isNotEmpty() &&
+                            !isCancelled(rs, gen) &&
+                            sendReplyToWeChat &&
+                            followUpRounds < MAX_FOLLOWUP_ROUNDS &&
+                            step < cfg.maxSteps
+                        if (canFollowUp) {
+                            rs.pendingIncoming.clear()
+                            followUpRounds++
+                            true
+                        } else {
+                            if (rs.runGen.get() == gen) rs.isRunning = false
+                            false
+                        }
+                    }
+                    if (shouldFollowUp) {
+                        snapshot = AgentSessionStore.snapshotForPrompt(talker)
+                        if (!isAdmin) allowedImagesSet.addAll(collectTimelineImagePaths(snapshot.third))
+                        inFlightToolMsgs.clear()
+                        finalReplyText = ""
+                        AcidLogger.i(TAG, "continuing same loop with queued messages ($talker, followUp=$followUpRounds)")
+                        continue
+                    }
                     break
                 }
 
@@ -146,8 +188,16 @@ internal object AgentLoopRunner {
             }
         } finally {
             rs.activeConn = null
-            if (rs.runGen.get() == gen) {
-                rs.isRunning = false
+            val (finishThisRun, shouldTriggerDeferred) = synchronized(rs.stateLock) {
+                if (rs.runGen.get() == gen) {
+                    rs.isRunning = false
+                    rs.pendingIncoming.clear()
+                    true to (rs.deferredGuestTrigger && !rs.stopRequested)
+                } else {
+                    false to false
+                }
+            }
+            if (finishThisRun) {
                 synchronized(session) {
                     session.timeline.forEach { if (it.running) it.running = false }
                 }
@@ -162,6 +212,9 @@ internal object AgentLoopRunner {
                             notifyState(talker)
                         }
                     }
+                }
+                if (shouldTriggerDeferred) {
+                    AcidAgentLoop.maybeTriggerDeferredGuest(talker)
                 }
             }
         }
@@ -315,6 +368,42 @@ internal object AgentLoopRunner {
             return existing to now
         }
         return existing to lastPushMs
+    }
+
+    private fun drainPendingIncoming(rs: RunState): List<PendingIncoming> = synchronized(rs.stateLock) {
+        if (rs.pendingIncoming.isEmpty()) return emptyList()
+        val out = rs.pendingIncoming.toList()
+        rs.pendingIncoming.clear()
+        out
+    }
+
+    private fun formatPendingIncomingForLoop(
+        items: List<PendingIncoming>,
+        cfg: AgentConfigStore.ModelConfig,
+    ): String {
+        val lines = ArrayList<String>(items.size)
+        for (it in items) {
+            val sender = it.senderName.ifBlank { "对方" }
+            val cleanText = AgentSessionModels.stripWakeWordForModel(it.text, cfg)
+                .ifEmpty { "(在聊天中呼叫了你，请结合最近对话简短回应)" }
+            lines += "[$sender(聊天框) ${formatContextTime(it.timestampMs)}]: $cleanText"
+        }
+        if (lines.isEmpty()) return ""
+        return "[对话进行中对方补充的新消息（请结合此最新消息调整后续决策或回复）]\n" + lines.joinToString("\n")
+    }
+
+    private fun appendPendingIncomingToInFlight(inFlightToolMsgs: MutableList<JSONObject>, formatted: String) {
+        if (formatted.isBlank()) return
+        val last = inFlightToolMsgs.lastOrNull()
+        if (last != null && last.optString("role") == "user") {
+            when (val existingContent = last.opt("content")) {
+                is JSONArray -> existingContent.put(JSONObject().put("type", "text").put("text", formatted))
+                is String -> last.put("content", if (existingContent.isBlank()) formatted else "$existingContent\n$formatted")
+                else -> inFlightToolMsgs += JSONObject().put("role", "user").put("content", formatted)
+            }
+        } else {
+            inFlightToolMsgs += JSONObject().put("role", "user").put("content", formatted)
+        }
     }
 
     private fun isCancelled(rs: RunState, gen: Int): Boolean = rs.stopRequested || rs.runGen.get() != gen

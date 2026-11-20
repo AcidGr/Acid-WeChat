@@ -1,7 +1,11 @@
 package com.acid.wechat.ui
 
 import android.app.Activity
+import android.os.Handler
+import android.os.Looper
 import android.view.MenuItem
+import android.view.View
+import com.acid.wechat.agent.AgentConfigStore
 import com.acid.wechat.core.AcidLogger
 import com.acid.wechat.core.DexKitLocator
 import com.acid.wechat.core.HostContext
@@ -32,10 +36,17 @@ object ChatHeaderAiHook {
     @Volatile private var fragmentFieldOnCtx: Field? = null
     @Volatile private var findMenuInfoMethod: Method? = null
     @Volatile private var addTextOptionMenuMethod: Method? = null
+    @Volatile private var addTextOptionMenuStyledMethod: Method? = null
     @Volatile private var removeOptionMenuMethod: Method? = null
     @Volatile private var updateOptionMenuTextMethod: Method? = null
+    @Volatile private var menuStyleEnumClass: Class<*>? = null
+    @Volatile private var menuStyleNormal: Any? = null
+    @Volatile private var menuStyleTakeover: Any? = null
+    @Volatile private var menuInfoStyleField: Field? = null
+    @Volatile private var getTalkerMethodRef: Method? = null
 
     private val latestCtxByFragment = ConcurrentHashMap<Int, WeakReference<Any>>()
+    private val latestFragments = ConcurrentHashMap<Int, WeakReference<Any>>()
 
     fun registerDexRules() {
         ruleHeaderUpdateMenu = DexKitLocator.registerMethod(
@@ -84,6 +95,7 @@ object ChatHeaderAiHook {
             AcidLogger.w(TAG, "ChatHeaderAiHook skipped: DexKit resolution incomplete")
             return
         }
+        getTalkerMethodRef = getTalkerMethod
 
         val ctxCls = getTalkerMethod.declaringClass
         ctxFieldOnHeader = findFieldByType(updateMenuMethod.declaringClass, ctxCls)
@@ -103,7 +115,10 @@ object ChatHeaderAiHook {
                         val header = param.thisObject ?: return
                         val ctx = ctxFieldOnHeader?.get(header) ?: return
                         val fragment = fragmentFieldOnCtx?.get(ctx) ?: return
-                        latestCtxByFragment[System.identityHashCode(fragment)] = WeakReference(ctx)
+                        val fragKey = System.identityHashCode(fragment)
+                        latestCtxByFragment[fragKey] = WeakReference(ctx)
+                        latestFragments[fragKey] = WeakReference(fragment)
+                        pruneDeadFragmentsIfNeeded()
                         val talker = (getTalkerMethod.invoke(ctx) as? String)?.trim().orEmpty()
                         if (talker.isEmpty()) return
 
@@ -116,7 +131,7 @@ object ChatHeaderAiHook {
                         val hasAiMenu = findMenuInfoMethod?.invoke(fragment, AI_MENU_ID) != null
                         // Register AI before WeChat inserts menuId=0 ("...") so AI renders to its left.
                         if (!hasMoreMenu && !hasAiMenu) {
-                            addAiMenu(fragment, ctx, getTalkerMethod, getNickMethod)
+                            addAiMenu(fragment, ctx, talker, getTalkerMethod, getNickMethod)
                         }
                     }
                 }
@@ -127,15 +142,18 @@ object ChatHeaderAiHook {
                         val header = param.thisObject ?: return
                         val ctx = ctxFieldOnHeader?.get(header) ?: return
                         val fragment = fragmentFieldOnCtx?.get(ctx) ?: return
-                        latestCtxByFragment[System.identityHashCode(fragment)] = WeakReference(ctx)
+                        val fragKey = System.identityHashCode(fragment)
+                        latestCtxByFragment[fragKey] = WeakReference(ctx)
+                        latestFragments[fragKey] = WeakReference(fragment)
+                        pruneDeadFragmentsIfNeeded()
                         val talker = (getTalkerMethod.invoke(ctx) as? String)?.trim().orEmpty()
                         if (talker.isEmpty()) return
 
                         ensureFragmentMenuMethods(fragment.javaClass)
                         if (findMenuInfoMethod?.invoke(fragment, AI_MENU_ID) == null) {
-                            addAiMenu(fragment, ctx, getTalkerMethod, getNickMethod)
+                            addAiMenu(fragment, ctx, talker, getTalkerMethod, getNickMethod)
                         } else {
-                            updateOptionMenuTextMethod?.invoke(fragment, AI_MENU_ID, "AI")
+                            applyMenuVisual(fragment, talker, forceInvalidate = false)
                         }
                     }
                 }
@@ -146,9 +164,49 @@ object ChatHeaderAiHook {
         }
     }
 
+    private fun pruneDeadFragmentsIfNeeded() {
+        if (latestFragments.size <= 16) return
+        val iter = latestFragments.entries.iterator()
+        while (iter.hasNext()) {
+            val (fragKey, fragRef) = iter.next()
+            if (fragRef.get() == null) {
+                iter.remove()
+                latestCtxByFragment.remove(fragKey)
+            }
+        }
+    }
+
+    fun refreshTakeoverBadge(talker: String) {
+        if (talker.isBlank()) return
+        Handler(Looper.getMainLooper()).post {
+            runCatching {
+                val getTalker = getTalkerMethodRef ?: return@runCatching
+                val iter = latestFragments.entries.iterator()
+                while (iter.hasNext()) {
+                    val (fragKey, fragRef) = iter.next()
+                    val fragment = fragRef.get()
+                    if (fragment == null) {
+                        iter.remove()
+                        latestCtxByFragment.remove(fragKey)
+                        continue
+                    }
+                    val ctx = latestCtxByFragment[fragKey]?.get() ?: continue
+                    val curTalker = (runCatching { getTalker.invoke(ctx) as? String }.getOrNull())?.trim().orEmpty()
+                    if (curTalker == talker) {
+                        ensureFragmentMenuMethods(fragment.javaClass)
+                        applyMenuVisual(fragment, curTalker, forceInvalidate = true)
+                    }
+                }
+            }.onFailure {
+                AcidLogger.w(TAG, "refreshTakeoverBadge failed for $talker", it)
+            }
+        }
+    }
+
     private fun addAiMenu(
         fragment: Any,
         fallbackCtx: Any,
+        talker: String,
         getTalkerMethod: Method,
         getNickMethod: Method?,
     ) {
@@ -158,7 +216,53 @@ object ChatHeaderAiHook {
             openChatAgentDialog(fragment, liveCtx, getTalkerMethod, getNickMethod)
             true
         }
-        addTextOptionMenuMethod?.invoke(fragment, AI_MENU_ID, "AI", listener)
+        val style = resolveMenuStyle(AgentConfigStore.isTakeoverEnabled(talker))
+        val styledMethod = addTextOptionMenuStyledMethod
+        if (styledMethod != null && style != null) {
+            styledMethod.invoke(fragment, AI_MENU_ID, "AI", listener, null, style)
+        } else {
+            addTextOptionMenuMethod?.invoke(fragment, AI_MENU_ID, "AI", listener)
+        }
+    }
+
+    private fun applyMenuVisual(fragment: Any, talker: String, forceInvalidate: Boolean) {
+        val menuInfo = findMenuInfoMethod?.invoke(fragment, AI_MENU_ID) ?: return
+        val styleCls = menuStyleEnumClass
+        var styleChanged = false
+        if (styleCls != null) {
+            val field = resolveMenuInfoStyleField(menuInfo.javaClass, styleCls)
+            val targetStyle = resolveMenuStyle(AgentConfigStore.isTakeoverEnabled(talker))
+            if (field != null && targetStyle != null) {
+                val prev = runCatching { field.get(menuInfo) }.getOrNull()
+                if (prev != targetStyle) {
+                    field.set(menuInfo, targetStyle)
+                    styleChanged = true
+                }
+            }
+        }
+        updateOptionMenuTextMethod?.invoke(fragment, AI_MENU_ID, "AI")
+        if (styleChanged || forceInvalidate) {
+            resolveFragmentActivity(fragment)?.invalidateOptionsMenu()
+        }
+    }
+
+    private fun resolveMenuStyle(takeoverEnabled: Boolean): Any? =
+        if (takeoverEnabled) menuStyleTakeover ?: menuStyleNormal else menuStyleNormal
+
+    private fun resolveMenuInfoStyleField(infoCls: Class<*>, styleCls: Class<*>): Field? {
+        menuInfoStyleField?.let { if (it.declaringClass.isAssignableFrom(infoCls)) return it }
+        var cur: Class<*>? = infoCls
+        while (cur != null && cur != Any::class.java) {
+            for (f in cur.declaredFields) {
+                if (f.type == styleCls) {
+                    f.isAccessible = true
+                    menuInfoStyleField = f
+                    return f
+                }
+            }
+            cur = cur.superclass
+        }
+        return null
     }
 
     private fun removeAiMenuIfPresent(fragment: Any) {
@@ -201,6 +305,32 @@ object ChatHeaderAiHook {
                 "addTextOptionMenu",
                 listOf(Int::class.javaPrimitiveType!!, String::class.java, MenuItem.OnMenuItemClickListener::class.java),
             )
+        }
+        if (addTextOptionMenuStyledMethod == null) {
+            var cur: Class<*>? = cls
+            while (cur != null && cur != Any::class.java && addTextOptionMenuStyledMethod == null) {
+                for (m in cur.declaredMethods) {
+                    val p = m.parameterTypes
+                    if (m.name == "addTextOptionMenu" && p.size == 5 &&
+                        p[0] == Int::class.javaPrimitiveType &&
+                        p[1] == String::class.java &&
+                        p[2] == MenuItem.OnMenuItemClickListener::class.java &&
+                        p[3] == View.OnLongClickListener::class.java &&
+                        p[4].isEnum
+                    ) {
+                        m.isAccessible = true
+                        addTextOptionMenuStyledMethod = m
+                        val enumCls = p[4]
+                        menuStyleEnumClass = enumCls
+                        val constants = enumCls.enumConstants
+                        menuStyleNormal = constants?.firstOrNull { (it as? Enum<*>)?.name == "NORMAL" }
+                        menuStyleTakeover = constants?.firstOrNull { (it as? Enum<*>)?.name == "TRANSPARENT_GREEN_TEXT" }
+                            ?: constants?.firstOrNull { (it as? Enum<*>)?.name == "GREEN" }
+                        break
+                    }
+                }
+                cur = cur.superclass
+            }
         }
         if (findMenuInfoMethod == null) {
             findMenuInfoMethod = ReflectHelper.findMethod(

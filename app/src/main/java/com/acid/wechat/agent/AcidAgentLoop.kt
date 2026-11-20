@@ -22,12 +22,22 @@ object AcidAgentLoop {
         fun onTimelineChanged(talker: String)
     }
 
+    internal data class PendingIncoming(
+        val senderName: String,
+        val text: String,
+        val timestampMs: Long,
+    )
+
     internal class RunState {
+        val stateLock = Any()
         val runGen = AtomicInteger(0)
         @Volatile var isRunning = false
         @Volatile var currentStep = 0
         @Volatile var stopRequested = false
         @Volatile var activeConn: HttpURLConnection? = null
+        @Volatile var currentMode: InvocationMode = InvocationMode.PANEL_MASTER
+        @Volatile var deferredGuestTrigger: Boolean = false
+        val pendingIncoming = ArrayDeque<PendingIncoming>()
     }
 
     private val runStates = ConcurrentHashMap<String, RunState>()
@@ -46,11 +56,15 @@ object AcidAgentLoop {
 
     fun stop(talker: String) {
         val rs = runStates.getOrPut(talker) { RunState() }
-        rs.stopRequested = true
-        rs.runGen.incrementAndGet()
+        synchronized(rs.stateLock) {
+            rs.stopRequested = true
+            rs.runGen.incrementAndGet()
+            rs.isRunning = false
+            rs.deferredGuestTrigger = false
+            rs.pendingIncoming.clear()
+        }
         runCatching { rs.activeConn?.disconnect() }
         rs.activeConn = null
-        rs.isRunning = false
         val session = AgentSessionStore.getOrLoad(talker)
         synchronized(session) {
             for (it in session.timeline) {
@@ -80,19 +94,20 @@ object AcidAgentLoop {
         AgentConfigStore.ensureInitialized()
         val cfg = AgentConfigStore.getConfig()
         val session = AgentSessionStore.getOrLoad(talker, titleHint)
-        val now = System.currentTimeMillis()
-        synchronized(session) {
-            session.timeline += TimelineItem(
-                id = session.nextId(),
-                kind = "master",
-                senderName = "master",
-                timestampMs = now,
-                timeText = formatBubbleTime(now),
-                text = text,
-                chatVisible = false,
-            )
-        }
+        val rs = runStates.getOrPut(talker) { RunState() }
         if (!cfg.hasApiKey) {
+            val now = System.currentTimeMillis()
+            synchronized(session) {
+                session.timeline += TimelineItem(
+                    id = session.nextId(),
+                    kind = "master",
+                    senderName = "master",
+                    timestampMs = now,
+                    timeText = formatBubbleTime(now),
+                    text = text,
+                    chatVisible = false,
+                )
+            }
             AgentLoopRunner.appendError(
                 session,
                 "未配置 API Key：请在右上角快速填入，或编辑 ${AgentConfigStore.modelsFile().absolutePath}",
@@ -101,10 +116,32 @@ object AcidAgentLoop {
             notifyTimeline(talker)
             return
         }
-        startWorker(talker, session, cfg, InvocationMode.PANEL_MASTER, sendReplyToWeChat = false)
+        val gen = synchronized(rs.stateLock) {
+            if (rs.isRunning) return
+            val now = System.currentTimeMillis()
+            synchronized(session) {
+                session.timeline += TimelineItem(
+                    id = session.nextId(),
+                    kind = "master",
+                    senderName = "master",
+                    timestampMs = now,
+                    timeText = formatBubbleTime(now),
+                    text = text,
+                    chatVisible = false,
+                )
+            }
+            prepareRunLocked(rs, InvocationMode.PANEL_MASTER)
+        }
+        launchWorker(talker, session, rs, cfg, InvocationMode.PANEL_MASTER, sendReplyToWeChat = false, gen = gen)
     }
 
-    fun submitChatTrigger(talker: String, isMaster: Boolean) {
+    fun submitChatTrigger(
+        talker: String,
+        isMaster: Boolean,
+        incomingSender: String = "",
+        incomingText: String = "",
+        incomingTimestampMs: Long = System.currentTimeMillis(),
+    ) {
         AgentConfigStore.ensureInitialized()
         val cfg = AgentConfigStore.getConfig()
         if (!cfg.hasApiKey) {
@@ -113,7 +150,38 @@ object AcidAgentLoop {
         }
         val session = AgentSessionStore.getOrLoad(talker)
         val mode = if (isMaster) InvocationMode.CHAT_TRIGGER_MASTER else InvocationMode.CHAT_TRIGGER_GUEST
-        startWorker(talker, session, cfg, mode, sendReplyToWeChat = true)
+        val rs = runStates.getOrPut(talker) { RunState() }
+        val gen = synchronized(rs.stateLock) {
+            if (!isMaster && rs.isRunning && !rs.stopRequested) {
+                if (rs.currentMode == InvocationMode.CHAT_TRIGGER_GUEST) {
+                    if (incomingText.isNotBlank()) {
+                        rs.pendingIncoming.addLast(PendingIncoming(incomingSender, incomingText, incomingTimestampMs))
+                    }
+                    AcidLogger.i(TAG, "queued mid-loop incoming message for $talker (pending=${rs.pendingIncoming.size})")
+                } else {
+                    rs.deferredGuestTrigger = true
+                    AcidLogger.i(TAG, "deferred guest trigger for $talker until ${rs.currentMode} finishes")
+                }
+                return
+            }
+            prepareRunLocked(rs, mode)
+        }
+        launchWorker(talker, session, rs, cfg, mode, sendReplyToWeChat = true, gen = gen)
+    }
+
+    internal fun maybeTriggerDeferredGuest(talker: String) {
+        val rs = runStates[talker] ?: return
+        val shouldTrigger = synchronized(rs.stateLock) {
+            if (rs.deferredGuestTrigger && !rs.isRunning && !rs.stopRequested) {
+                rs.deferredGuestTrigger = false
+                true
+            } else {
+                false
+            }
+        }
+        if (shouldTrigger) {
+            submitChatTrigger(talker = talker, isMaster = false)
+        }
     }
 
     fun triggerManualCompact(talker: String): AgentMemoryCompactor.CompactOutcome {
@@ -141,18 +209,26 @@ object AcidAgentLoop {
         return res
     }
 
-    private fun startWorker(
-        talker: String,
-        session: ChatSessionState,
-        cfg: AgentConfigStore.ModelConfig,
-        mode: InvocationMode,
-        sendReplyToWeChat: Boolean,
-    ) {
-        val rs = runStates.getOrPut(talker) { RunState() }
+    private fun prepareRunLocked(rs: RunState, mode: InvocationMode): Int {
         val gen = rs.runGen.incrementAndGet()
         rs.stopRequested = false
         rs.isRunning = true
         rs.currentStep = 0
+        rs.currentMode = mode
+        rs.deferredGuestTrigger = false
+        rs.pendingIncoming.clear()
+        return gen
+    }
+
+    private fun launchWorker(
+        talker: String,
+        session: ChatSessionState,
+        rs: RunState,
+        cfg: AgentConfigStore.ModelConfig,
+        mode: InvocationMode,
+        sendReplyToWeChat: Boolean,
+        gen: Int,
+    ) {
         notifyTimeline(talker)
         notifyState(talker)
 

@@ -65,9 +65,7 @@ object ChatAgentFeature : AcidFeature {
         ChatHeaderAiHook.init { FeatureRegistry.isEnabled(this@ChatAgentFeature) }
         MsgNoticeHelper.addInsertObserver(::onMessageInserted)
         VoiceTransBridge.addTranscriptObserver { msgId, talker, text ->
-            if (AgentSessionStore.updateVoiceTranscript(talker, msgId, text)) {
-                AcidAgentLoop.notifyExternalTimelineUpdate(talker)
-            }
+            handleVoiceTranscribed(talker, msgId, text)
         }
         WcdbBridge.addInsertListener { table, values, _ ->
             when (table) {
@@ -85,9 +83,74 @@ object ChatAgentFeature : AcidFeature {
             val text = values.getAsString("content")?.trim().orEmpty()
             if (msgId <= 0L || text.isEmpty()) return
             val row = ChatRepository.queryVoiceMessageByMsgId(msgId) ?: return
-            if (AgentSessionStore.updateVoiceTranscript(row.talker, msgId, text)) {
-                AcidAgentLoop.notifyExternalTimelineUpdate(row.talker)
+            handleVoiceTranscribed(row.talker, msgId, text)
+        }
+    }
+
+    private fun handleVoiceTranscribed(talker: String, msgId: Long, rawText: String) {
+        runCatching {
+            val cleanText = rawText.trim()
+            if (talker.isBlank() || msgId <= 0L || cleanText.isEmpty()) return
+            val body = "[语音: $cleanText]"
+            val alreadyUpdated = AgentSessionStore.updateVoiceTranscript(talker, msgId, cleanText)
+            if (alreadyUpdated) {
+                AcidAgentLoop.notifyExternalTimelineUpdate(talker)
             }
+
+            if (!FeatureRegistry.isEnabled(this)) return
+            if (!ConfigStore.isEffective(ConfigSchema.CHAT_AGENT_PASSIVE_AT)) return
+            if (talker.startsWith("gh_") || talker in ignoredTalkers) return
+
+            val msgRow = ChatRepository.queryMessageById(msgId) ?: return
+            if ((msgRow.getAsInteger("isSend") ?: 0) != 0) return
+            if ((msgRow.getAsInteger("type") ?: 0) != VoiceTransBridge.MSG_TYPE_VOICE) return
+            val msgSvrId = msgRow.getAsLong("msgSvrId") ?: 0L
+            val createTimeMs = msgRow.getAsLong("createTime")?.takeIf { it > 0L } ?: return
+            if (abs(System.currentTimeMillis() - createTimeMs) > LIVE_MSG_WINDOW_MS) return
+
+            val takeover = AgentConfigStore.isTakeoverEnabled(talker)
+            val isGroup = talker.endsWith("@chatroom")
+            val agentCfg = AgentConfigStore.getConfig()
+            val wakeWordMatched = agentCfg.wakeWordEnabled &&
+                AgentSessionModels.containsWakeWord(cleanText, agentCfg.wakeWord)
+            if (!(takeover && !isGroup) && !wakeWordMatched) return
+
+            synchronized(triggeredMsgIds) {
+                if (!triggeredMsgIds.add(msgId)) return
+            }
+
+            val rawContent = msgRow.getAsString("content").orEmpty()
+            val senderName = ChatRepository.resolveSenderDisplayName(talker, rawContent, null)
+            AgentSessionStore.getOrLoad(talker)
+            if (!alreadyUpdated && !AgentSessionStore.updateVoiceTranscript(talker, msgId, cleanText)) {
+                AgentSessionStore.ingestLiveMessageIfSessionActive(
+                    talker = talker,
+                    msgId = msgId,
+                    msgSvrId = msgSvrId,
+                    isSend = false,
+                    senderName = senderName,
+                    body = body,
+                    timestampMs = createTimeMs,
+                )
+            }
+            AcidAgentLoop.notifyExternalTimelineUpdate(talker)
+
+            triggerCount.incrementAndGet()
+            FeatureRegistry.recordHit(id)
+            AcidLogger.i(
+                TAG,
+                "triggered chat agent by voice in $talker (msgId=$msgId, takeover=$takeover, wakeWord=$wakeWordMatched)",
+            )
+            AcidAgentLoop.submitChatTrigger(
+                talker = talker,
+                isMaster = false,
+                incomingSender = senderName,
+                incomingText = body,
+                incomingTimestampMs = createTimeMs,
+            )
+        }.onFailure {
+            FeatureRegistry.recordError(id, it)
+            AcidLogger.w(TAG, "handleVoiceTranscribed failed", it)
         }
     }
 
@@ -158,16 +221,20 @@ object ChatAgentFeature : AcidFeature {
 
             val triggerText = WeChatMessageFormatter.extractTriggerText(rawContent, body)
             val agentCfg = AgentConfigStore.getConfig()
+            val takeover = AgentConfigStore.isTakeoverEnabled(talker)
+            val isGroup = talker.endsWith("@chatroom")
             val wakeWordMatched = agentCfg.wakeWordEnabled &&
                 AgentSessionModels.containsWakeWord(triggerText, agentCfg.wakeWord)
-            val groupAtMatched = talker.endsWith("@chatroom") &&
+            val groupAtMatched = isGroup &&
+                takeover &&
                 agentCfg.wakeOnGroupAt &&
                 isMentioningSelf(msgObj, values)
+            val privateTakeoverMatched = !isGroup && takeover
             val shouldTrigger = if (isSend) {
                 wakeWordMatched
             } else {
                 ConfigStore.isEffective(ConfigSchema.CHAT_AGENT_PASSIVE_AT) &&
-                    (wakeWordMatched || groupAtMatched)
+                    (wakeWordMatched || groupAtMatched || privateTakeoverMatched)
             }
             if (!shouldTrigger) return
 
@@ -191,9 +258,15 @@ object ChatAgentFeature : AcidFeature {
             FeatureRegistry.recordHit(id)
             AcidLogger.i(
                 TAG,
-                "triggered chat agent in $talker (isSend=$isSend, msgId=$insertedMsgId, wakeWord=$wakeWordMatched, groupAt=$groupAtMatched)",
+                "triggered chat agent in $talker (isSend=$isSend, msgId=$insertedMsgId, takeover=$takeover, wakeWord=$wakeWordMatched, groupAt=$groupAtMatched)",
             )
-            AcidAgentLoop.submitChatTrigger(talker = talker, isMaster = isSend)
+            AcidAgentLoop.submitChatTrigger(
+                talker = talker,
+                isMaster = isSend,
+                incomingSender = senderName,
+                incomingText = body,
+                incomingTimestampMs = createTimeMs,
+            )
         }.onFailure {
             FeatureRegistry.recordError(id, it)
             AcidLogger.w(TAG, "onMessageInserted failed", it)

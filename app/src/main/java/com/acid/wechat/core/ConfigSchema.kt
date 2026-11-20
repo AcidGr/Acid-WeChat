@@ -176,7 +176,7 @@ object ConfigSchema {
     ))
     val CHAT_AGENT_PASSIVE_AT = register(BoolSpec(
         "chat_agent_passive_at", true, FeatureCategory.CHAT, "AI 助手", "收到唤醒自动回复",
-        "群聊被 @我 或收到唤醒词时自动调用本机 Agent 回复",
+        "对外自动回复总开关：允许他人通过唤醒词或会话接管触发自动回复",
         dependsOn = CHAT_AGENT_ENABLED.key,
     ))
     val GLOBAL_AGENT_ENTRY = register(BoolSpec(

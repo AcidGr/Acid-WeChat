@@ -65,6 +65,7 @@ object AgentConfigStore {
         val wakeOnGroupAt: Boolean = true,
         val wakeWordEnabled: Boolean = true,
         val wakeWord: String = DEFAULT_WAKE_WORD,
+        val takeoverTalkers: Set<String> = emptySet(),
     ) {
         val hasApiKey: Boolean get() = apiKey.isNotBlank() || isLoopbackBaseUrl(baseUrl)
 
@@ -101,13 +102,26 @@ object AgentConfigStore {
         return canonicalTools(picked)
     }
 
+    private fun parseTakeoverTalkers(arr: JSONArray?): Set<String> {
+        if (arr == null) return emptySet()
+        val picked = LinkedHashSet<String>(arr.length())
+        for (i in 0 until arr.length()) {
+            val t = arr.optString(i, "").trim()
+            if (t.isNotEmpty() && t != AgentSessionModels.GLOBAL_TALKER) picked += t
+        }
+        return picked
+    }
+
     private fun sanitizeConfig(cfg: ModelConfig): ModelConfig {
         val filtered = canonicalTools(cfg.enabledTools.filterTo(LinkedHashSet()) { cfg.isToolConfigured(it) })
         val cleanWake = sanitizeWakeWord(cfg.wakeWord)
-        return if (filtered == cfg.enabledTools && cleanWake == cfg.wakeWord) {
+        val cleanTakeovers = cfg.takeoverTalkers.filterTo(LinkedHashSet()) {
+            it.isNotBlank() && it != AgentSessionModels.GLOBAL_TALKER
+        }
+        return if (filtered == cfg.enabledTools && cleanWake == cfg.wakeWord && cleanTakeovers == cfg.takeoverTalkers) {
             cfg
         } else {
-            cfg.copy(enabledTools = filtered, wakeWord = cleanWake)
+            cfg.copy(enabledTools = filtered, wakeWord = cleanWake, takeoverTalkers = cleanTakeovers)
         }
     }
 
@@ -280,6 +294,25 @@ object AgentConfigStore {
         }
     }
 
+    fun isTakeoverEnabled(talker: String): Boolean {
+        val clean = talker.trim()
+        if (clean.isEmpty() || clean == AgentSessionModels.GLOBAL_TALKER) return false
+        return clean in getConfig().takeoverTalkers
+    }
+
+    fun setTakeoverEnabled(talker: String, enabled: Boolean): Boolean {
+        val clean = talker.trim()
+        if (clean.isEmpty() || clean == AgentSessionModels.GLOBAL_TALKER) return false
+        synchronized(lock) {
+            val f = modelsFile()
+            if (f.exists() && f.length() > 0L) reloadFromDiskLocked(f)
+            val updatedSet = cached.takeoverTalkers.toMutableSet()
+            if (enabled) updatedSet += clean else updatedSet -= clean
+            saveLocked(sanitizeConfig(cached.copy(takeoverTalkers = updatedSet)))
+            return clean in cached.takeoverTalkers
+        }
+    }
+
     fun cleanWorkspace(): AcidIo.CleanResult = AcidIo.cleanDirContents(workspaceDir())
 
     fun toUiJson(cfg: ModelConfig = getConfig()): JSONObject = JSONObject().apply {
@@ -404,6 +437,7 @@ object AgentConfigStore {
                     wakeOnGroupAt = obj.optBoolean("wake_on_group_at", true),
                     wakeWordEnabled = obj.optBoolean("wake_word_enabled", true),
                     wakeWord = sanitizeWakeWord(obj.optString("wake_word", DEFAULT_WAKE_WORD)),
+                    takeoverTalkers = parseTakeoverTalkers(obj.optJSONArray("takeover_talkers")),
                 ),
             )
             lastMtime = f.lastModified()
@@ -439,6 +473,7 @@ object AgentConfigStore {
                 put("wake_on_group_at", cleanCfg.wakeOnGroupAt)
                 put("wake_word_enabled", cleanCfg.wakeWordEnabled)
                 put("wake_word", cleanCfg.wakeWord)
+                put("takeover_talkers", JSONArray(cleanCfg.takeoverTalkers.toList()))
             }
             val f = modelsFile()
             AcidIo.writeAtomicUtf8(f, obj.toString(2))

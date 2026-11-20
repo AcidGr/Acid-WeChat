@@ -81,6 +81,8 @@ object AgentDialog {
                 put("talker", talker)
                 put("title", page.title)
                 put("isGlobal", talker == AgentSessionModels.GLOBAL_TALKER)
+                put("isGroup", talker.endsWith("@chatroom"))
+                put("takeoverEnabled", AgentConfigStore.isTakeoverEnabled(talker))
                 put("running", running)
                 put("step", step)
                 put("totalTokens", totalTokens)
@@ -143,6 +145,17 @@ object AgentDialog {
             }
             val res = AcidAgentLoop.sendTextToChat(talker, text, itemId)
             return JSONObject().put("ok", res.ok).put("detail", res.detail).toString()
+        }
+
+        @JavascriptInterface
+        fun setTakeover(enabled: Boolean): String {
+            if (talker == AgentSessionModels.GLOBAL_TALKER) {
+                return JSONObject().put("ok", false).put("takeoverEnabled", false).toString()
+            }
+            val saved = AgentConfigStore.setTakeoverEnabled(talker, enabled)
+            ChatHeaderAiHook.refreshTakeoverBadge(talker)
+            AcidLogger.i(TAG, "setTakeover($talker) -> $saved")
+            return JSONObject().put("ok", true).put("takeoverEnabled", saved).toString()
         }
 
         @JavascriptInterface
