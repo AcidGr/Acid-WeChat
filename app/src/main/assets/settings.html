@@ -741,6 +741,17 @@
   </div>
 </div>
 
+<div class="confirm-mask" id="tabletConfirmMask" onclick="onTabletConfirmMaskClick(event)">
+  <div class="confirm-card">
+    <div class="confirm-title">开启强制平板模式？</div>
+    <div class="confirm-desc">开启后将伪装为平板设备形态并显示「作为其他设备登录」入口。改变设备形态存在触发微信风控的风险，开启或关闭均需重启微信生效。</div>
+    <div class="confirm-actions">
+      <button class="confirm-cancel" type="button" onclick="closeTabletConfirm()">取消</button>
+      <button class="confirm-ok danger" type="button" onclick="confirmEnableTabletMode()">确认开启</button>
+    </div>
+  </div>
+</div>
+
 <script>
   let state = {
     hostVersion: "",
@@ -1647,7 +1658,7 @@
       }
 
       for (const g of groups) {
-        const itemsHtml = groupMap[g].map(item => {
+        let itemsHtml = groupMap[g].map(item => {
           const locked = isItemLocked(item);
           if (item.type === "text") {
             const val = item.value != null ? item.value : (item.placeholder || "");
@@ -1656,6 +1667,7 @@
                 <div class="row-label">${escapeHtml(item.title)}</div>
                 <input
                   class="text-input"
+                  id="text-input-${escapeAttr(item.configKey)}"
                   type="text"
                   value="${escapeHtml(val)}"
                   placeholder="${escapeHtml(item.placeholder || '')}"
@@ -1674,6 +1686,14 @@
             </div>
           `;
         }).join("");
+
+        if (activeCat === "me" && g === "虚拟定位") {
+          itemsHtml += `
+            <div class="row row-col">
+              <button class="test-btn" type="button" onclick="openFakeLocationPicker()">打开微信地图选点</button>
+            </div>
+          `;
+        }
 
         html += renderGroupCard(activeCat, g, itemsHtml);
       }
@@ -1933,28 +1953,41 @@
     syncAgentToolRows();
   }
 
-  function refreshAgentIfIdle() {
+  function refreshStateIfIdle() {
     const activeEl = document.activeElement;
     if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) return;
     try {
       const fresh = JSON.parse(window.AcidBridge.getState());
+      let updated = false;
       if (fresh && fresh.agent) {
         state.agent = fresh.agent;
-        if (activeCat === "home") {
-          renderList();
-        }
+        updated = true;
+      }
+      if (fresh && Array.isArray(fresh.items)) {
+        state.items = fresh.items;
+        updated = true;
+      }
+      if (updated && (activeCat === "home" || activeCat === "me")) {
+        const content = document.getElementById("content");
+        const prevScroll = content ? content.scrollTop : 0;
+        renderList();
+        if (content) content.scrollTop = prevScroll;
       }
     } catch (_) {}
   }
 
-  window.addEventListener("focus", refreshAgentIfIdle);
+  window.addEventListener("focus", refreshStateIfIdle);
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) refreshAgentIfIdle();
+    if (!document.hidden) refreshStateIfIdle();
   });
 
   function toggleItem(key) {
     const item = state.items.find(i => i.configKey === key);
     if (!item || isItemLocked(item)) return;
+    if (key === "force_tablet_mode" && !item.enabled) {
+      openTabletConfirm();
+      return;
+    }
     const next = !item.enabled;
     item.enabled = next;
     renderList();
@@ -1962,6 +1995,53 @@
       window.AcidBridge.toggleConfig(key, next);
     } catch (_) {}
   }
+
+  function openTabletConfirm() {
+    const mask = document.getElementById("tabletConfirmMask");
+    if (mask) mask.classList.add("open");
+  }
+
+  function closeTabletConfirm() {
+    const mask = document.getElementById("tabletConfirmMask");
+    if (mask) mask.classList.remove("open");
+  }
+
+  function onTabletConfirmMaskClick(ev) {
+    if (ev.target && ev.target.id === "tabletConfirmMask") closeTabletConfirm();
+  }
+
+  function confirmEnableTabletMode() {
+    closeTabletConfirm();
+    const item = state.items.find(i => i.configKey === "force_tablet_mode");
+    if (!item || item.enabled) return;
+    item.enabled = true;
+    renderList();
+    try {
+      window.AcidBridge.toggleConfig("force_tablet_mode", true);
+    } catch (_) {}
+  }
+
+  function openFakeLocationPicker() {
+    try {
+      window.AcidBridge.pickFakeLocation();
+    } catch (_) {}
+  }
+
+  window.onFakeLocationPicked = function(res) {
+    if (!res) return;
+    const latItem = state.items.find(i => i.configKey === "fake_location_lat");
+    const lngItem = state.items.find(i => i.configKey === "fake_location_lng");
+    if (res.lat != null) {
+      if (latItem) latItem.value = String(res.lat);
+      const latInp = document.getElementById("text-input-fake_location_lat");
+      if (latInp) latInp.value = String(res.lat);
+    }
+    if (res.lng != null) {
+      if (lngItem) lngItem.value = String(res.lng);
+      const lngInp = document.getElementById("text-input-fake_location_lng");
+      if (lngInp) lngInp.value = String(res.lng);
+    }
+  };
 
   function onTextInput(el, key) {
     const item = state.items.find(i => i.configKey === key);

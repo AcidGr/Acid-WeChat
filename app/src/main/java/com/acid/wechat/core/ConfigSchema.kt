@@ -229,6 +229,24 @@ object ConfigSchema {
         "disable_hot_update", true, FeatureCategory.ME, "版本保护", "禁止微信热更新",
         "拦截微信 Tinker 热补丁加载与后台合成并清理补丁目录，防止热更新导致模块失效（重启微信生效）",
     ))
+    val FAKE_LOCATION_ENABLED = register(BoolSpec(
+        "fake_location_enabled", false, FeatureCategory.ME, "虚拟定位", "开启虚拟定位",
+        "拦截微信定位回调，返回自定义经纬度（GCJ-02，支持主进程与小程序/网页子进程）",
+    ))
+    val FAKE_LOCATION_LAT = register(StringSpec(
+        "fake_location_lat", "39.908700", FeatureCategory.ME, "虚拟定位", "纬度 (Lat)",
+        "目标纬度（GCJ-02 坐标系，-90 到 90）", placeholder = "39.908700",
+        dependsOn = FAKE_LOCATION_ENABLED.key,
+    ))
+    val FAKE_LOCATION_LNG = register(StringSpec(
+        "fake_location_lng", "116.397500", FeatureCategory.ME, "虚拟定位", "经度 (Lng)",
+        "目标经度（GCJ-02 坐标系，-180 到 180）", placeholder = "116.397500",
+        dependsOn = FAKE_LOCATION_ENABLED.key,
+    ))
+    val FORCE_TABLET_MODE = register(BoolSpec(
+        "force_tablet_mode", false, FeatureCategory.ME, "平板模式", "强制平板模式",
+        "伪装平板设备形态并显示「作为其他设备登录」入口（存在风控风险，需重启微信生效）",
+    ))
     val DEBUG_SERVER = register(BoolSpec(
         "debug_server", true, FeatureCategory.ME, "系统调试", "本地调试接口",
         "开启 127.0.0.1 本地调试与配置接口（重启微信生效）", isSystem = true,
@@ -254,7 +272,7 @@ object ConfigSchema {
     fun describeJsonSchemaForPrompt(configPath: String): String = buildString {
         append("Settings SSOT file: ").append(configPath).append(". ")
         append("Direct edits to this JSON live-reload automatically into running hooks without restarting WeChat ")
-        append("(except debug_server/debug_port). Schema: ")
+        append("(except debug_server/debug_port/disable_hot_update/force_tablet_mode). Schema: ")
         ALL_SPECS.forEachIndexed { idx, spec ->
             if (idx > 0) append(", ")
             append('`').append(spec.key).append("`: ").append(spec.schemaTypeDescription())

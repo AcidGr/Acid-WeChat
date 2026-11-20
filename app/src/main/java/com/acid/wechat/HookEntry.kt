@@ -16,8 +16,10 @@ import com.acid.wechat.features.AutoVoiceTransFeature
 import com.acid.wechat.features.BlockHotUpdateFeature
 import com.acid.wechat.features.ChatAgentFeature
 import com.acid.wechat.features.CustomGameEmojiFeature
+import com.acid.wechat.features.FakeLocationFeature
 import com.acid.wechat.features.FakeSnsCommentFeature
 import com.acid.wechat.features.FakeSnsLikeFeature
+import com.acid.wechat.features.ForceTabletModeFeature
 import com.acid.wechat.features.SavePathFeature
 import com.acid.wechat.features.SnsTailFeature
 import com.acid.wechat.ui.HomeHeaderAiHook
@@ -78,9 +80,10 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
         if (!initialized.compareAndSet(false, true)) return
 
         runCatching {
-            HostContext.init(app)
+            HostContext.init(app, isMainProcess = false)
             ConfigStore.load(syncSchemaFile = false)
             FeatureRegistry.register(SavePathFeature)
+            FeatureRegistry.register(FakeLocationFeature)
             FeatureRegistry.registerAllDexRules()
             DexKitLocator.resolveAll(forceRescan = false, saveCache = false)
             FeatureRegistry.initAll()
@@ -94,7 +97,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
         if (!initialized.compareAndSet(false, true)) return
 
         runCatching {
-            HostContext.init(app)
+            HostContext.init(app, isMainProcess = true)
             ConfigStore.load()
             AgentConfigStore.ensureInitialized()
             AcidLogger.i(
@@ -120,6 +123,8 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             FeatureRegistry.register(FakeSnsCommentFeature)
             FeatureRegistry.register(SnsTailFeature)
             FeatureRegistry.register(SavePathFeature)
+            FeatureRegistry.register(FakeLocationFeature)
+            FeatureRegistry.register(ForceTabletModeFeature)
             FeatureRegistry.register(BlockHotUpdateFeature)
             FeatureRegistry.registerAllDexRules()
 

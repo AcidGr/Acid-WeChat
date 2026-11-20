@@ -30,9 +30,11 @@ import com.acid.wechat.core.FeatureOption
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.HostContext
 import com.acid.wechat.debug.DebugServer
+import com.acid.wechat.features.FakeLocationFeature
 import com.acid.wechat.wechat.WeChatAbTestStore
 import org.json.JSONArray
 import org.json.JSONObject
+import java.lang.ref.WeakReference
 
 /**
  * Clean, lightweight white WebView settings panel opened from WeChat Settings top-right "Acid".
@@ -278,6 +280,40 @@ object SettingsDialog {
                 Handler(Looper.getMainLooper()).postDelayed({
                     Process.killProcess(Process.myPid())
                 }, 150L)
+            }
+        }
+
+        @JavascriptInterface
+        fun pickFakeLocation() {
+            val actRef = WeakReference(activity)
+            val wvRef = WeakReference(webView)
+            activity.runOnUiThread {
+                val started = FakeLocationFeature.launchMapPicker(activity) { picked ->
+                    val act = actRef.get() ?: return@launchMapPicker
+                    val payload = JSONObject().apply {
+                        put("lat", picked.latText)
+                        put("lng", picked.lngText)
+                        put("label", picked.label)
+                    }.toString()
+                    act.runOnUiThread {
+                        if (act.isFinishing || act.isDestroyed) return@runOnUiThread
+                        val suffix = if (picked.label.isNotBlank()) "（${picked.label}）" else ""
+                        Toast.makeText(
+                            act,
+                            "已选定坐标：${picked.latText}, ${picked.lngText}$suffix",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                        runCatching {
+                            wvRef.get()?.evaluateJavascript(
+                                "window.onFakeLocationPicked && window.onFakeLocationPicked($payload)",
+                                null,
+                            )
+                        }
+                    }
+                }
+                if (!started) {
+                    Toast.makeText(activity, "拉起微信地图选点失败", Toast.LENGTH_SHORT).show()
+                }
             }
         }
 

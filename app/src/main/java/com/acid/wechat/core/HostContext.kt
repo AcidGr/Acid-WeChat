@@ -61,6 +61,10 @@ object HostContext {
         private set
 
     @Volatile
+    var isMainProcess: Boolean = true
+        private set
+
+    @Volatile
     var isInitialized: Boolean = false
         private set
 
@@ -68,8 +72,9 @@ object HostContext {
         modulePath = path
     }
 
-    fun init(application: Application) {
+    fun init(application: Application, isMainProcess: Boolean = true) {
         app = application
+        this.isMainProcess = isMainProcess
         hostPackage = application.packageName.ifBlank { hostPackage }
         classLoader = application.classLoader
         startedAtMs = System.currentTimeMillis()
