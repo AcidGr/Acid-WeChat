@@ -170,6 +170,10 @@ object ConfigSchema {
         "后台收到他人语音通知时等待短时转写并直接显示文字",
         dependsOn = AUTO_VOICE_TRANS.key,
     ))
+    val BLOCK_TYPING_STATUS = register(BoolSpec(
+        "block_typing_status", false, FeatureCategory.CHAT, "输入状态", "禁止显示正在输入",
+        "拦截聊天输入状态上报（兼容新旧协议），对方看不到「对方正在输入…」且不影响查看对方输入状态",
+    ))
     val CHAT_AGENT_ENABLED = register(BoolSpec(
         "chat_agent_enabled", true, FeatureCategory.CHAT, "AI 助手", "聊天 AI 入口与会话代理",
         "在聊天右上角聊天信息左侧添加 AI 按钮，并维护每个私聊/群聊的独立会话上下文",

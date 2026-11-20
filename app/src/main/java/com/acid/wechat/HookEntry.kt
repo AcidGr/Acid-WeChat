@@ -14,6 +14,7 @@ import com.acid.wechat.features.AntiMomentsPostFeature
 import com.acid.wechat.features.AntiRecallFeature
 import com.acid.wechat.features.AutoVoiceTransFeature
 import com.acid.wechat.features.BlockHotUpdateFeature
+import com.acid.wechat.features.BlockTypingStatusFeature
 import com.acid.wechat.features.ChatAgentFeature
 import com.acid.wechat.features.CustomGameEmojiFeature
 import com.acid.wechat.features.FakeLocationFeature
@@ -117,6 +118,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             FeatureRegistry.register(AntiRecallFeature)
             FeatureRegistry.register(CustomGameEmojiFeature)
             FeatureRegistry.register(AutoVoiceTransFeature)
+            FeatureRegistry.register(BlockTypingStatusFeature)
             FeatureRegistry.register(ChatAgentFeature)
             FeatureRegistry.register(AntiMomentsPostFeature)
             FeatureRegistry.register(FakeSnsLikeFeature)
