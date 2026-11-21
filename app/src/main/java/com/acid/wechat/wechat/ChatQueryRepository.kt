@@ -133,7 +133,7 @@ object ChatQueryRepository {
                     isChatroom = u.endsWith("@chatroom"),
                     unreadCount = unread,
                     lastTimeText = formatTime(ts),
-                    lastContent = cleanPreview(rawContent),
+                    lastContent = WeChatMessageFormatter.formatConversationPreview(u, rawContent),
                 )
             }
         }
@@ -209,9 +209,6 @@ object ChatQueryRepository {
         imgPath: String = "",
         msgSvrId: Long = 0L,
     ): String = WeChatMessageFormatter.formatMessageBody(talker, isSend, type, raw, msgId, imgPath, msgSvrId)
-
-    private fun cleanPreview(raw: String): String =
-        raw.replace('\n', ' ').trim().take(120)
 
     private fun formatTime(tsMs: Long): String {
         if (tsMs <= 0L) return ""

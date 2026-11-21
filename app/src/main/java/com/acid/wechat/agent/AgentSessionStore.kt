@@ -191,7 +191,13 @@ object AgentSessionStore {
     private fun refreshRecentMediaPlaceholders(session: ChatSessionState) {
         val updated = synchronized(session) {
             var changed = false
-            for (it in session.timeline.takeLast(25)) {
+            val total = session.timeline.size
+            val recentStart = (total - 25).coerceAtLeast(0)
+            for (i in session.timeline.indices) {
+                val it = session.timeline[i]
+                val isRecent = i >= recentStart
+                val isLegacy = !it.compacted && isLegacyUnformattedText(it.text)
+                if (!isRecent && !isLegacy) continue
                 val refreshed = resolveUpdatedMediaText(it)
                 if (refreshed != null && refreshed != it.text) {
                     it.text = refreshed
@@ -203,12 +209,21 @@ object AgentSessionStore {
         if (updated) persist(session)
     }
 
+    private fun isLegacyUnformattedText(text: String): Boolean =
+        text.startsWith("[type_") ||
+            text.startsWith("[card]") ||
+            text.startsWith("[location]") ||
+            text.contains("<voipmsg", ignoreCase = true) ||
+            text.contains("<sysmsg", ignoreCase = true) ||
+            text.contains("<?xml", ignoreCase = true) ||
+            text.contains("<appmsg", ignoreCase = true)
+
     private fun resolveUpdatedMediaText(it: TimelineItem): String? = when {
         it.sourceMsgId > 0L && it.text == "[语音]" ->
             ChatRepository.queryVoiceTranscript(it.sourceMsgId, "")?.trim()?.takeIf { t -> t.isNotEmpty() }?.let { "[语音: $it]" }
         (it.sourceMsgId > 0L || it.sourceMsgSvrId > 0L) && (it.text == "[图片]" || it.text.startsWith("[图片: ")) ->
             ChatImageRepository.resolveMessageImagePath(it.sourceMsgId, it.sourceMsgSvrId, "")?.let { "[图片: $it]" }
-        (it.sourceMsgId > 0L || it.sourceMsgSvrId > 0L) && (it.text.startsWith("[type_") || it.text.contains("<?xml") || it.text.contains("<appmsg")) -> {
+        (it.sourceMsgId > 0L || it.sourceMsgSvrId > 0L) && isLegacyUnformattedText(it.text) -> {
             val row = (if (it.sourceMsgId > 0L) ChatRepository.queryMessageById(it.sourceMsgId) else null)
                 ?: (if (it.sourceMsgSvrId > 0L) ChatRepository.queryMessageBySvrId(it.sourceMsgSvrId) else null)
             row?.let { r ->

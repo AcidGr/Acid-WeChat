@@ -1,26 +1,30 @@
 package com.acid.wechat.wechat
 
 /**
- * Formats raw WeChat DB message payloads (plain text, media placeholders, `<appmsg>` cards,
- * and `<refermsg>` quote replies) into clean human- and Agent-readable text.
+ * Formats raw WeChat DB message payloads (plain text, media placeholders, VoIP calls,
+ * location/contact cards, system notices, `<appmsg>` cards, and `<refermsg>` quotes)
+ * into clean human- and Agent-readable text.
  */
 object WeChatMessageFormatter {
-    private val tagOptions = setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)
-    private fun tagRegex(tag: String): Regex =
-        Regex("<$tag>(?:<!\\[CDATA\\[)?(.*?)(?:\\]\\]>)?</$tag>", tagOptions)
+    private val systemCompositeTypes = setOf(
+        10000, 10002, 64, 268445456, 268445458, 285222674, 570425393, 603979825,
+    )
+    private val patCompositeTypes = setOf(889192497, 922746929)
 
-    private val titleTagRegex = tagRegex("title")
-    private val referMsgBlockRegex = tagRegex("refermsg")
-    private val typeTagRegex = tagRegex("type")
-    private val svrIdTagRegex = tagRegex("svrid")
-    private val displayNameTagRegex = tagRegex("displayname")
-    private val chatUsrTagRegex = tagRegex("chatusr")
-    private val fromUsrTagRegex = tagRegex("fromusr")
-    private val contentTagRegex = tagRegex("content")
-    private val urlTagRegex = tagRegex("url")
+    fun normalizeType(type: Int): Int {
+        if ((type ushr 16) == 0) return type
+        val low16 = type and 0xFFFF
+        if (low16 == 10000 || low16 == 10002) return low16
+        val low8 = type and 0xFF
+        if (low8 == 49) return 49
+        return if (low8 != 0 && low16 == low8) low8 else type
+    }
 
-    fun isTextOrAppMsgType(type: Int): Boolean =
-        type == 1 || type == 49 || type == 822083633 || (type > 0 && (type and 0xFF) == 49)
+    fun isTextOrAppMsgType(type: Int): Boolean {
+        if (type in systemCompositeTypes || type in patCompositeTypes) return false
+        val base = normalizeType(type)
+        return base == 1 || base == 49
+    }
 
     fun stripGroupPrefix(talker: String, isSend: Boolean, raw: String): String {
         if (!talker.endsWith("@chatroom") || isSend) return raw
@@ -29,7 +33,7 @@ object WeChatMessageFormatter {
     }
 
     fun extractAppMsgTitle(stripped: String): String? =
-        extractGroup(titleTagRegex, stripped)?.takeIf { it.isNotEmpty() }
+        WeChatSpecialMsgFormatter.extractTitle(stripped)
 
     /**
      * Extracts the newly typed reply text when checking wake-word triggers, ignoring wake words
@@ -38,8 +42,7 @@ object WeChatMessageFormatter {
     fun extractTriggerText(rawContent: String, formattedBody: String): String {
         if (!formattedBody.startsWith("[引用 ")) return formattedBody
         val beforeRefer = rawContent.substringBefore("<refermsg", rawContent)
-        return extractAppMsgTitle(beforeRefer)?.let(::unescapeXml)?.trim()?.takeIf { it.isNotEmpty() }
-            ?: formattedBody.substringAfter("] ", "")
+        return extractAppMsgTitle(beforeRefer) ?: formattedBody.substringAfter("] ", "")
     }
 
     fun formatMessageBody(
@@ -53,10 +56,23 @@ object WeChatMessageFormatter {
         allowReferLookup: Boolean = true,
     ): String {
         val stripped = stripGroupPrefix(talker, isSend, raw)
-        if (type == 49 || type == 822083633 || (type > 0 && (type and 0xFF) == 49) || stripped.contains("<appmsg")) {
-            return formatAppMsgBody(talker, stripped, allowReferLookup)
+        if (type in systemCompositeTypes || type in patCompositeTypes) {
+            return WeChatSpecialMsgFormatter.formatSystemBody(stripped)
         }
-        return when (type) {
+        val base = normalizeType(type)
+        if (base == 49 || stripped.contains("<appmsg", ignoreCase = true)) {
+            if (stripped.contains("<sysmsg", ignoreCase = true) && !stripped.contains("<appmsg", ignoreCase = true)) {
+                return WeChatSpecialMsgFormatter.formatSystemBody(stripped)
+            }
+            return WeChatSpecialMsgFormatter.formatAppMsgBody(talker, stripped, allowReferLookup)
+        }
+        if (stripped.contains("<sysmsg", ignoreCase = true) && base !in setOf(1, 3, 34, 43, 47)) {
+            return WeChatSpecialMsgFormatter.formatSystemBody(stripped)
+        }
+        if (stripped.contains("<voipmsg", ignoreCase = true)) {
+            return WeChatSpecialMsgFormatter.formatVoipBody(stripped)
+        }
+        return when (base) {
             1 -> stripped.trim()
             3 -> ChatImageRepository.resolveMessageImagePath(msgId, msgSvrId, imgPath)
                 ?.let { "[图片: $it]" }
@@ -69,104 +85,82 @@ object WeChatMessageFormatter {
                 }
                 if (!transcript.isNullOrBlank()) "[语音: ${transcript.trim()}]" else "[语音]"
             }
-            43 -> "[视频]"
+            37 -> WeChatSpecialMsgFormatter.formatFriendVerifyBody(stripped)
+            40 -> "[好友推荐]"
+            42, 66, 67 -> WeChatSpecialMsgFormatter.formatCardBody(stripped)
+            43, 62 -> "[视频]"
             47 -> "[动画表情]"
-            10000 -> "[系统提示] " + stripped.trim()
-            else -> "[${msgTypeLabel(type)}] " + stripped.replace('\n', ' ').take(160)
-        }
-    }
-
-    fun msgTypeLabel(type: Int): String = when {
-        type == 1 -> "text"
-        type == 3 -> "image"
-        type == 34 -> "voice"
-        type == 42 -> "card"
-        type == 43 -> "video"
-        type == 47 -> "emoji"
-        type == 48 -> "location"
-        type == 822083633 -> "quote"
-        type == 49 || (type > 0 && (type and 0xFF) == 49) -> "appmsg"
-        type == 10000 -> "system"
-        else -> "type_$type"
-    }
-
-    private fun formatAppMsgBody(talker: String, stripped: String, allowReferLookup: Boolean): String {
-        val beforeRefer = stripped.substringBefore("<refermsg", stripped)
-        val title = extractAppMsgTitle(beforeRefer)?.let(::unescapeXml)?.trim().orEmpty()
-        val referXml = extractGroup(referMsgBlockRegex, stripped)
-        if (referXml != null) {
-            val referType = extractGroup(typeTagRegex, referXml)?.toIntOrNull() ?: 1
-            val referSvrId = extractGroup(svrIdTagRegex, referXml)?.toLongOrNull() ?: 0L
-            val rawDisplayName = extractGroup(displayNameTagRegex, referXml)?.let(::unescapeXml).orEmpty()
-            val chatusr = extractGroup(chatUsrTagRegex, referXml).orEmpty()
-            val fromusr = extractGroup(fromUsrTagRegex, referXml).orEmpty()
-            val referContent = extractGroup(contentTagRegex, referXml)?.let(::unescapeXml).orEmpty()
-
-            val referSender = resolveReferSender(chatusr.ifEmpty { fromusr }, rawDisplayName)
-            val fromDb = if (allowReferLookup && referSvrId > 0L) {
-                ChatRepository.queryMessageBySvrId(referSvrId)?.let { refRow ->
-                    formatMessageBody(
-                        talker = refRow.getAsString("talker") ?: talker,
-                        isSend = (refRow.getAsInteger("isSend") ?: 0) != 0,
-                        type = refRow.getAsInteger("type") ?: referType,
-                        raw = refRow.getAsString("content").orEmpty(),
-                        msgId = refRow.getAsLong("msgId") ?: 0L,
-                        imgPath = refRow.getAsString("imgPath").orEmpty(),
-                        msgSvrId = referSvrId,
-                        allowReferLookup = false,
-                    ).trim()
-                }?.takeIf { it.isNotEmpty() }
-            } else {
-                null
+            48 -> WeChatSpecialMsgFormatter.formatLocationBody(stripped)
+            50, 52, 53 -> WeChatSpecialMsgFormatter.formatVoipBody(stripped)
+            85, 86 -> "[来电铃声]"
+            10000, 10002 -> WeChatSpecialMsgFormatter.formatSystemBody(stripped)
+            else -> {
+                val clean = if (stripped.contains('<') && stripped.contains('>')) {
+                    WeChatSpecialMsgFormatter.cleanXmlText(stripped)
+                } else {
+                    stripped.replace('\n', ' ').trim()
+                }
+                val label = msgTypeLabel(type)
+                if (clean.isNotEmpty()) "[$label] ${clean.take(160)}" else "[$label]"
             }
-
-            val referBody = fromDb ?: when (referType) {
-                1 -> stripGroupPrefix(talker, false, referContent).trim()
-                3 -> ChatImageRepository.resolveMessageImagePath(0L, referSvrId, "")
-                    ?.let { "[图片: $it]" }
-                    ?: "[图片]"
-                34 -> "[语音]"
-                43 -> "[视频]"
-                47 -> "[动画表情]"
-                else -> extractAppMsgTitle(referContent)?.let(::unescapeXml)?.trim()
-                    ?: referContent.replace('\n', ' ').take(80).ifEmpty { "[消息]" }
-            }
-            val cleanRefer = referBody.replace('\n', ' ').trim().ifEmpty { "[消息]" }
-            return if (title.isNotEmpty()) "[引用 $referSender: $cleanRefer] $title" else "[引用 $referSender: $cleanRefer]"
-        }
-
-        val appType = extractGroup(typeTagRegex, beforeRefer)?.toIntOrNull() ?: 0
-        val url = extractGroup(urlTagRegex, beforeRefer)?.let(::unescapeXml)?.trim().orEmpty()
-        return when {
-            appType == 6 && title.isNotEmpty() -> "[文件: $title]"
-            title.isNotEmpty() && (url.startsWith("http://", true) || url.startsWith("https://", true)) ->
-                "[链接卡片: $title | $url]"
-            title.isNotEmpty() -> title
-            else -> "[卡片/链接消息]"
         }
     }
 
-    private fun resolveReferSender(targetWxid: String, rawDisplayName: String): String {
-        if (targetWxid.isNotEmpty() && targetWxid == ChatRepository.querySelfWxid()) return "master"
-        val names = targetWxid.takeIf { it.isNotEmpty() && !it.endsWith("@chatroom") }
-            ?.let { ChatRepository.queryContactNames(it) }
-        return names?.first?.takeIf { it.isNotBlank() }
-            ?: rawDisplayName.ifEmpty { null }
-            ?: names?.second?.takeIf { it.isNotBlank() }
-            ?: names?.third?.takeIf { it.isNotBlank() }
-            ?: "对方"
+    /**
+     * Cleans `rconversation.content` previews (which lack a reliable `type` column) for `list_chats`.
+     */
+    fun formatConversationPreview(talker: String, raw: String): String {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return ""
+        val hasGroupPrefix = talker.endsWith("@chatroom") && trimmed.indexOf(":\n") in 1..64
+        val senderPrefix = if (hasGroupPrefix) {
+            ChatRepository.resolveSenderDisplayName(talker, trimmed, null) + ": "
+        } else {
+            ""
+        }
+        val stripped = stripGroupPrefix(talker, false, trimmed).trim()
+        val body = when {
+            stripped.equals("voip_content_voice", ignoreCase = true) ||
+                stripped.equals("voip_content_video", ignoreCase = true) ||
+                stripped.contains("<voipmsg", ignoreCase = true) ->
+                WeChatSpecialMsgFormatter.formatVoipBody(stripped)
+            stripped.contains("<appmsg", ignoreCase = true) ->
+                WeChatSpecialMsgFormatter.formatAppMsgBody(talker, stripped, allowReferLookup = false)
+            stripped.contains("<sysmsg", ignoreCase = true) ->
+                WeChatSpecialMsgFormatter.formatSystemBody(stripped)
+            stripped.contains("<location", ignoreCase = true) ->
+                WeChatSpecialMsgFormatter.formatLocationBody(stripped)
+            stripped.contains("<img", ignoreCase = true) -> "[图片]"
+            stripped.contains("<videomsg", ignoreCase = true) -> "[视频]"
+            stripped.contains("<emoji", ignoreCase = true) -> "[动画表情]"
+            stripped.contains("<msg", ignoreCase = true) && stripped.contains("nickname=", ignoreCase = true) ->
+                WeChatSpecialMsgFormatter.formatCardBody(stripped)
+            stripped.startsWith("<") ->
+                WeChatSpecialMsgFormatter.cleanXmlText(stripped).ifEmpty { "[消息]" }
+            else -> stripped.replace('\n', ' ').trim()
+        }
+        return (senderPrefix + body).take(140)
     }
 
-    private fun extractGroup(regex: Regex, input: String): String? =
-        regex.find(input)?.groupValues?.getOrNull(1)?.trim()
-
-    private fun unescapeXml(raw: String): String = raw
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-        .replace("&#x20;", " ")
-        .replace("&#x0A;", "\n")
-        .replace("&#x0a;", "\n")
-        .replace("&amp;", "&")
+    fun msgTypeLabel(type: Int): String {
+        if (type == 822083633) return "quote"
+        if (type in patCompositeTypes) return "pat"
+        if (type in systemCompositeTypes) return "system"
+        return when (normalizeType(type)) {
+            1 -> "text"
+            3 -> "image"
+            34 -> "voice"
+            37 -> "friend_verify"
+            40 -> "contact_recommend"
+            42, 66, 67 -> "card"
+            43, 62 -> "video"
+            47 -> "emoji"
+            48 -> "location"
+            49 -> "appmsg"
+            50, 52, 53 -> "voip"
+            85, 86 -> "ringtone"
+            10000, 10002 -> "system"
+            else -> "type_$type"
+        }
+    }
 }
