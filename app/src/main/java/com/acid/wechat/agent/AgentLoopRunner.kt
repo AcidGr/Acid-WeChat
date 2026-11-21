@@ -322,7 +322,7 @@ internal object AgentLoopRunner {
     private fun summarizeTool(name: String, args: JSONObject): String = when (name) {
         "wechat" -> {
             val act = args.optString("action", "?")
-            val target = args.optString("talker", args.optString("query", args.optString("sns_id", "")))
+            val target = args.optString("talker", args.optString("query", ""))
             if (target.isNotEmpty()) "$act · $target" else act
         }
         "read", "write", "edit" -> args.optString("file_path", name)

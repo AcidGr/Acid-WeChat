@@ -3,30 +3,23 @@ package com.acid.wechat.agent
 import com.acid.wechat.agent.AgentToolRegistry.makeTool
 import com.acid.wechat.agent.AgentToolRegistry.prop
 import com.acid.wechat.agent.AgentToolRegistry.propEnum
-import com.acid.wechat.agent.AgentToolRegistry.propStringArray
 import com.acid.wechat.core.ConfigStore
 import com.acid.wechat.core.DexKitLocator
-import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.core.HostContext
 import com.acid.wechat.core.WcdbBridge
 import com.acid.wechat.wechat.ChatQueryRepository
-import com.acid.wechat.wechat.ChatRepository
-import com.acid.wechat.wechat.SnsFakeCommentStore
-import com.acid.wechat.wechat.SnsFakeLikeStore
-import com.acid.wechat.wechat.SnsProto
-import com.acid.wechat.wechat.SnsRepository
 import com.acid.wechat.wechat.WeChatSender
 import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 5th core tool: `wechat` — gives the Agent unified inspection & control over
- * contacts, recent chats, messages, sending messages, Moments actions (by explicit sns_id), and config.
+ * Core `wechat` tool: gives the Agent unified inspection & control over
+ * status, contacts, recent chats, messages, and sending messages.
  */
 object WeChatAgentTool : AgentTool {
     override val name = "wechat"
     override val title = "微信综合工具 (wechat)"
-    override val summary = "查状态、搜联系人、读消息、全局发消息、伪赞评与改配置"
+    override val summary = "查状态、搜联系人、读消息与全局发消息"
 
     private val actions = listOf(
         "status",
@@ -34,9 +27,6 @@ object WeChatAgentTool : AgentTool {
         "list_chats",
         "read_messages",
         "send_message",
-        "moment_fake_like",
-        "moment_fake_comment",
-        "config_patch",
     )
 
     override fun buildOpenAiSchema(): JSONObject = buildOpenAiSchema(ToolPolicy())
@@ -49,8 +39,8 @@ object WeChatAgentTool : AgentTool {
         }
         val desc = when {
             !policy.isAdmin -> "Read history messages from the CURRENT chat conversation only (`action='read_messages'`)."
-            !policy.allowSendMessage -> "Inspect status, search contacts/chats, read chat messages, apply fake likes/comments (with explicit sns_id), or patch config.json. (`send_message` is disabled in per-chat sessions.)"
-            else -> "Interact with hooked WeChat: inspect status, search contacts/chats, read chat messages, send real WeChat text messages, apply fake likes/comments (with explicit sns_id), or patch config.json."
+            !policy.allowSendMessage -> "Inspect status, search contacts/chats, or read chat messages. (`send_message` is disabled in per-chat sessions.)"
+            else -> "Interact with hooked WeChat: inspect status, search contacts/chats, read chat messages, or send real WeChat text messages."
         }
         val props = JSONObject().apply {
             put("action", propEnum("string", "WeChat action to execute.", allowedActions))
@@ -58,17 +48,9 @@ object WeChatAgentTool : AgentTool {
                 put("query", prop("string", "Search query for 'search_contacts'."))
                 put("talker", prop("string", "Target contact/group username (`wxid_...`, `...@chatroom`, `filehelper`) or remark/nickname."))
                 if (policy.allowSendMessage) {
-                    put("text", prop("string", "Message text content for 'send_message' or comment text for 'moment_fake_comment'."))
-                } else {
-                    put("text", prop("string", "Comment text for 'moment_fake_comment'."))
+                    put("text", prop("string", "Message text content for 'send_message'."))
                 }
                 put("include_chatrooms", prop("boolean", "Include @chatroom groups in 'search_contacts' (default true)."))
-                put("sns_id", prop("string", "64-bit Moments snsId string for 'moment_fake_like'/'moment_fake_comment'."))
-                put("usernames", propStringArray("Friend usernames for 'moment_fake_like'."))
-                put("count", prop("integer", "Random friend count for 'moment_fake_like' when 'usernames' is omitted."))
-                put("username", prop("string", "Single friend username or name for 'moment_fake_comment'."))
-                put("clear", prop("boolean", "When true, clear fake likes/comments instead of adding."))
-                put("patch", prop("object", "Key-value JSON object to merge into config.json for 'config_patch'."))
             }
             put("keyword", prop("string", "Optional keyword filter for 'read_messages'."))
             put("limit", prop("integer", "Max items to return (default 25)."))
@@ -104,9 +86,6 @@ object WeChatAgentTool : AgentTool {
             "list_chats" -> handleListChats(args)
             "read_messages" -> handleReadMessages(args)
             "send_message" -> handleSendMessage(args)
-            "moment_fake_like" -> handleFakeLike(args)
-            "moment_fake_comment" -> handleFakeComment(args)
-            "config_patch" -> handleConfigPatch(args)
             else -> ToolResult("Error: Unknown wechat action '$action'. Valid: ${actions.joinToString(", ")}", true)
         }
     }
@@ -216,96 +195,6 @@ object WeChatAgentTool : AgentTool {
         return if (res.ok) ToolResult(payload.toString(2)) else ToolResult("Error: ${res.detail}", true)
     }
 
-    private fun handleFakeLike(args: JSONObject): ToolResult {
-        val snsId = parseSnsId(args) ?: return ToolResult("Error: Invalid or missing 'sns_id'.", true)
-        if (args.optBoolean("clear", false)) {
-            val prev = SnsFakeLikeStore.getUsernames(snsId)
-            SnsFakeLikeStore.set(snsId, emptyList())
-            val (ok, total) = SnsRepository.applyLikesToPost(snsId, emptyList(), prev, null)
-            return if (ok) {
-                ToolResult(JSONObject().put("ok", true).put("snsId", snsId.toString()).put("totalLikes", total).toString(2))
-            } else {
-                ToolResult("Error: Failed clearing fake likes for sns_id=$snsId.", true)
-            }
-        }
-
-        val chosen = mutableListOf<String>()
-        val rawArr = args.optJSONArray("usernames")
-        if (rawArr != null && rawArr.length() > 0) {
-            for (i in 0 until rawArr.length()) {
-                val item = rawArr.optString(i).trim()
-                resolveOrReturnError(item)?.let { chosen += it.username }
-            }
-        } else {
-            val cnt = args.optInt("count", 5).coerceIn(1, 50)
-            chosen += ChatRepository.queryFriends(limit = 400).shuffled().take(cnt).map { it.username }
-        }
-        val nowSec = (System.currentTimeMillis() / 1000L).toInt()
-        val entries = chosen.distinct().mapIndexed { idx, u ->
-            SnsProto.LikeEntry(u, ChatRepository.resolveSenderDisplayName(u, null, null), nowSec - idx)
-        }
-        val removed = SnsFakeLikeStore.getUsernames(snsId).filterTo(HashSet()) { u -> entries.none { it.username == u } }
-        SnsFakeLikeStore.set(snsId, entries)
-        val (ok, total) = SnsRepository.applyLikesToPost(snsId, entries, removed, null)
-        return if (ok) {
-            ToolResult(
-                JSONObject().put("ok", true).put("snsId", snsId.toString())
-                    .put("fakeLikesSet", entries.size).put("totalLikes", total).toString(2),
-            )
-        } else {
-            ToolResult("Error: Failed applying fake likes (ensure Moments was visited once).", true)
-        }
-    }
-
-    private fun handleFakeComment(args: JSONObject): ToolResult {
-        val snsId = parseSnsId(args) ?: return ToolResult("Error: Invalid or missing 'sns_id'.", true)
-        if (args.optBoolean("clear", false)) {
-            val removed = SnsFakeCommentStore.clear(snsId).mapTo(HashSet()) { it.commentId }
-            val (ok, total) = SnsRepository.applyCommentsToPost(snsId, emptyList(), removed, null)
-            return if (ok) {
-                ToolResult(JSONObject().put("ok", true).put("snsId", snsId.toString()).put("totalComments", total).toString(2))
-            } else {
-                ToolResult("Error: Failed clearing fake comments.", true)
-            }
-        }
-        val userInput = args.optString("username", "").ifBlank { args.optString("talker", "") }
-        val content = args.optString("text", "").ifBlank { args.optString("content", "") }
-        if (userInput.isBlank() || content.isBlank()) {
-            return ToolResult("Error: 'username' and 'text' are required for moment_fake_comment.", true)
-        }
-        val resolved = resolveOrReturnError(userInput) ?: return ToolResult(ambiguousOrMissingError(userInput), true)
-        val entry = SnsProto.CommentEntry(
-            commentId = SnsFakeCommentStore.nextCommentId(),
-            username = resolved.username,
-            nickname = resolved.displayName,
-            content = content,
-            createTime = (System.currentTimeMillis() / 1000L).toInt(),
-        )
-        SnsFakeCommentStore.add(snsId, entry)
-        val (ok, total) = SnsRepository.applyCommentsToPost(snsId, listOf(entry), emptySet(), null)
-        return if (ok) {
-            ToolResult(
-                JSONObject().put("ok", true).put("snsId", snsId.toString())
-                    .put("commentBy", resolved.displayName).put("totalComments", total).toString(2),
-            )
-        } else {
-            ToolResult("Error: Failed adding fake comment.", true)
-        }
-    }
-
-    private fun handleConfigPatch(args: JSONObject): ToolResult {
-        val patch = args.optJSONObject("patch") ?: return ToolResult("Error: Missing 'patch' JSON object.", true)
-        return runCatching {
-            val changed = ConfigStore.applyPatch(patch)
-            ToolResult(
-                JSONObject().put("ok", true).put("changedKeys", JSONArray(changed.toList()))
-                    .put("config", ConfigStore.snapshot()).toString(2),
-            )
-        }.getOrElse { err ->
-            ToolResult("Error: ${err.message}", true)
-        }
-    }
-
     private fun resolveOrReturnError(input: String): ChatQueryRepository.TalkerResolution.Resolved? =
         ChatQueryRepository.resolveTalker(input) as? ChatQueryRepository.TalkerResolution.Resolved
 
@@ -315,12 +204,5 @@ object WeChatAgentTool : AgentTool {
             "Error: Contact '$input' is ambiguous. Specify exact username from: $cand"
         }
         else -> "Error: Contact '$input' not found."
-    }
-
-    private fun parseSnsId(args: JSONObject): Long? {
-        val asStr = args.optString("sns_id", "").trim()
-        if (asStr.isNotEmpty()) return asStr.toLongOrNull()?.takeIf { it != 0L }
-        val asLong = args.optLong("sns_id", 0L)
-        return asLong.takeIf { it != 0L }
     }
 }

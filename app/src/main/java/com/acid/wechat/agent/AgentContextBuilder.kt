@@ -123,9 +123,9 @@ object AgentContextBuilder {
         val lines = ArrayList<String>(2)
         if ("wechat" in enabled) {
             lines += if (isGlobal) {
-                "1. `wechat`: 查询模块状态、搜索联系人/群（`search_contacts`）、查看最近聊天列表（`list_chats`）、读取任意聊天记录（`read_messages`）、发送真实微信消息（`send_message`）、朋友圈伪点赞/评论（需明确 `sns_id`）、修改 `config.json`。"
+                "1. `wechat`: 查询模块状态（`status`）、搜索联系人/群（`search_contacts`）、查看最近聊天列表（`list_chats`）、读取任意聊天记录（`read_messages`）、发送真实微信消息（`send_message`）。"
             } else {
-                "1. `wechat`: 查询模块状态、`search_contacts`、`list_chats`、`read_messages`、朋友圈伪点赞/评论、`config_patch`（已禁用 `send_message`）。"
+                "1. `wechat`: 查询模块状态（`status`）、`search_contacts`、`list_chats`、`read_messages`（已禁用 `send_message`）。"
             }
         }
         val otherTools = listOf("sendfile", "websearch", "webfetch", "drawimage", "readimage", "read", "write", "edit", "bash")

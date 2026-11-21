@@ -108,10 +108,6 @@ object AgentToolRegistry {
             put("enum", JSONArray(values))
         }
 
-    fun propStringArray(description: String): JSONObject = prop("array", description).apply {
-        put("items", JSONObject().put("type", "string"))
-    }
-
     fun makeTool(
         name: String,
         description: String,
