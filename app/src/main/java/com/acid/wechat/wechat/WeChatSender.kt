@@ -346,7 +346,7 @@ object WeChatSender {
         return result
     }
 
-    private fun resolveServiceInstance(serviceImplCls: Class<*>): Any? {
+    internal fun resolveServiceInstance(serviceImplCls: Class<*>): Any? {
         val getServiceMethod = if (::ruleServiceManagerGet.isInitialized) ruleServiceManagerGet.resolveMethod() else null
         if (getServiceMethod != null) {
             getServiceMethod.isAccessible = true

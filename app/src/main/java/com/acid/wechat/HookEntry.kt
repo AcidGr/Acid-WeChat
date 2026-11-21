@@ -25,6 +25,7 @@ import com.acid.wechat.features.SavePathFeature
 import com.acid.wechat.features.SnsTailFeature
 import com.acid.wechat.ui.HomeHeaderAiHook
 import com.acid.wechat.ui.SettingsHook
+import com.acid.wechat.wechat.WeChatImageDownloader
 import com.acid.wechat.wechat.WeChatSender
 import de.robv.android.xposed.IXposedHookLoadPackage
 import de.robv.android.xposed.IXposedHookZygoteInit
@@ -115,6 +116,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             // Register features & DexKit rules
             MsgNoticeHelper.registerDexRules()
             WeChatSender.registerDexRules()
+            WeChatImageDownloader.registerDexRules()
             FeatureRegistry.register(AntiRecallFeature)
             FeatureRegistry.register(CustomGameEmojiFeature)
             FeatureRegistry.register(AutoVoiceTransFeature)
@@ -135,6 +137,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
 
             MsgNoticeHelper.init()
             WeChatSender.init()
+            WeChatImageDownloader.init()
             FeatureRegistry.initAll()
             AcidLogger.i(TAG, "Acid-WeChat bootstrap completed")
         }.onFailure {

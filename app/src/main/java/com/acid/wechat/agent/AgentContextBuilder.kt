@@ -139,7 +139,7 @@ object AgentContextBuilder {
             }
             if ("bash" in otherTools) parts += "执行本地命令"
             if ("sendfile" in otherTools) parts += "用 `sendfile(path, talker?)` 向微信聊天发送图片或文件"
-            if ("readimage" in otherTools) parts += "用 `readimage(file_path)` 识别图片"
+            if ("readimage" in otherTools) parts += "用 `readimage(file_path, upgrade?)` 识别 `[图片: /path/...]`（仅在缩略图模糊时传 `upgrade=true` 加载中清图，禁止猜路径或拉原图）"
             if ("websearch" in otherTools) parts += "用 `websearch(query)` 联网搜索"
             if ("webfetch" in otherTools) parts += "用 `webfetch(url)` 读取链接卡片网页正文"
             if ("drawimage" in otherTools) parts += "用 `drawimage(prompt, reference_image)` 生成或编辑图片（每轮限生图一次）"
@@ -237,7 +237,7 @@ $toolsDesc
                     """.trimIndent()
                 }
                 val imgHint = if ("readimage" in availableTools) {
-                    "如需查看图里内容可直接调用 `readimage(file_path=...)` 识图。"
+                    "如需查看图里内容，请对明确给出的 `[图片: /path/...]` 调用 `readimage(file_path=...)` 识图（勿对无路径 `[图片]` 猜测路径；若返回仅是 `th_` 缩略图且细节不清，可再传 `upgrade=true` 加载标准中清图，严禁下载原图）。"
                 } else {
                     "（当前未开启 `readimage` 工具）"
                 }

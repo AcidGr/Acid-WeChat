@@ -8,6 +8,7 @@ import com.acid.wechat.agent.AgentSessionModels.formatBubbleTime
 import com.acid.wechat.agent.AgentSessionModels.formatContextTime
 import com.acid.wechat.agent.AgentSessionStore.ChatSessionState
 import com.acid.wechat.core.AcidLogger
+import com.acid.wechat.wechat.ChatImageRepository
 import com.acid.wechat.wechat.WeChatSender
 import org.json.JSONArray
 import org.json.JSONObject
@@ -35,11 +36,13 @@ internal object AgentLoopRunner {
         val isAdmin = mode != InvocationMode.CHAT_TRIGGER_GUEST
         var snapshot = AgentSessionStore.snapshotForPrompt(talker)
         val allowedImagesSet = Collections.synchronizedSet(LinkedHashSet<String>())
-        if (!isAdmin) allowedImagesSet.addAll(collectTimelineImagePaths(snapshot.third))
+        val allowedImageHashesSet = Collections.synchronizedSet(LinkedHashSet<String>())
+        if (!isAdmin) collectTimelineImageScope(snapshot.third, allowedImagesSet, allowedImageHashesSet)
         val policy = ToolPolicy(
             isAdmin = isAdmin,
             currentTalker = talker,
             allowedImagePaths = allowedImagesSet,
+            allowedImageHashes = allowedImageHashesSet,
             enabledTools = cfg.enabledTools,
             allowGuestDrawImage = cfg.allowGuestDrawImage,
         )
@@ -58,8 +61,10 @@ internal object AgentLoopRunner {
                     val drained = drainPendingIncoming(rs)
                     if (drained.isNotEmpty()) {
                         if (!isAdmin) {
-                            allowedImagesSet.addAll(
-                                collectTimelineImagePaths(AgentSessionStore.snapshotForPrompt(talker).third),
+                            collectTimelineImageScope(
+                                AgentSessionStore.snapshotForPrompt(talker).third,
+                                allowedImagesSet,
+                                allowedImageHashesSet,
                             )
                         }
                         appendPendingIncomingToInFlight(inFlightToolMsgs, formatPendingIncomingForLoop(drained, cfg))
@@ -167,7 +172,7 @@ internal object AgentLoopRunner {
                     }
                     if (shouldFollowUp) {
                         snapshot = AgentSessionStore.snapshotForPrompt(talker)
-                        if (!isAdmin) allowedImagesSet.addAll(collectTimelineImagePaths(snapshot.third))
+                        if (!isAdmin) collectTimelineImageScope(snapshot.third, allowedImagesSet, allowedImageHashesSet)
                         inFlightToolMsgs.clear()
                         finalReplyText = ""
                         AcidLogger.i(TAG, "continuing same loop with queued messages ($talker, followUp=$followUpRounds)")
@@ -290,18 +295,20 @@ internal object AgentLoopRunner {
         }
     }
 
-    private fun collectTimelineImagePaths(timeline: List<TimelineItem>): Set<String> {
-        val out = LinkedHashSet<String>()
+    private fun collectTimelineImageScope(
+        timeline: List<TimelineItem>,
+        outPaths: MutableSet<String>,
+        outHashes: MutableSet<String>,
+    ) {
         val imgTagRegex = Regex("\\[图片:\\s*([^\\]\n]+)\\]")
         for (it in timeline) {
             for (m in imgTagRegex.findAll(it.text)) {
                 val raw = m.groupValues.getOrNull(1)?.trim().orEmpty()
-                if (raw.isNotEmpty()) {
-                    runCatching { java.io.File(raw).canonicalPath }.getOrNull()?.let { out += it }
-                }
+                if (raw.isEmpty()) continue
+                runCatching { java.io.File(raw).canonicalPath }.getOrNull()?.let { outPaths += it }
+                ChatImageRepository.extractImageHash(raw)?.let { outHashes += it }
             }
         }
-        return out
     }
 
     fun appendError(session: ChatSessionState, msg: String) {

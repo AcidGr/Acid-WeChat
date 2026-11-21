@@ -23,6 +23,8 @@ import com.acid.wechat.wechat.WeChatMessageFormatter
 import org.json.JSONObject
 import java.lang.reflect.Field
 import java.util.Collections
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 
@@ -56,6 +58,10 @@ object ChatAgentFeature : AcidFeature {
     })
     private val triggerCount = AtomicInteger(0)
     @Volatile private var msgSourceFields: List<Field>? = null
+    private val imgRowIdWhereRegex = Regex("\\bid\\s*=", RegexOption.IGNORE_CASE)
+    private val imgSyncExecutor = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "AcidImgSync").apply { isDaemon = true }
+    }
 
     override fun registerDexRules() {
         ChatHeaderAiHook.registerDexRules()
@@ -71,6 +77,11 @@ object ChatAgentFeature : AcidFeature {
             when (table) {
                 "VoiceTransText" -> handleVoiceTransInsert(values)
                 "ImgInfo2" -> handleImgInfoInsert(values)
+            }
+        }
+        WcdbBridge.addUpdateListener { table, values, whereClause, whereArgs, _ ->
+            if (table == "ImgInfo2") {
+                handleImgInfoUpdate(values, whereClause, whereArgs)
             }
         }
     }
@@ -158,19 +169,63 @@ object ChatAgentFeature : AcidFeature {
         runCatching {
             val msgId = values.getAsLong("msglocalid") ?: 0L
             val msgSvrId = values.getAsLong("msgSvrId") ?: 0L
-            if (msgId <= 0L && msgSvrId <= 0L) return
-            val row = (if (msgId > 0L) ChatRepository.queryMessageById(msgId) else null)
-                ?: (if (msgSvrId > 0L) ChatRepository.queryMessageBySvrId(msgSvrId) else null)
-                ?: return
-            val talker = row.getAsString("talker")?.trim().orEmpty()
-            if (talker.isEmpty() || !AgentSessionStore.hasExistingSession(talker)) return
-            val resolvedMsgId = row.getAsLong("msgId") ?: msgId
-            val resolvedSvrId = row.getAsLong("msgSvrId") ?: msgSvrId
-            val imgPath = row.getAsString("imgPath").orEmpty()
-            val path = ChatImageRepository.resolveMessageImagePath(resolvedMsgId, resolvedSvrId, imgPath) ?: return
-            if (AgentSessionStore.updateImagePath(talker, resolvedMsgId, resolvedSvrId, path)) {
-                AcidAgentLoop.notifyExternalTimelineUpdate(talker)
+            refreshSessionImageFromIds(msgId, msgSvrId)
+        }
+    }
+
+    private fun handleImgInfoUpdate(
+        values: ContentValues,
+        whereClause: String?,
+        whereArgs: Array<String>?,
+    ) {
+        runCatching {
+            val big = values.getAsString("bigImgPath").orEmpty()
+            val mid = values.getAsString("midImgPath").orEmpty()
+            val hevc = values.getAsString("hevcPath").orEmpty()
+            val thumb = values.getAsString("thumbImgPath").orEmpty()
+            if (big.isBlank() && mid.isBlank() && hevc.isBlank() && thumb.isBlank()) return
+            val hash = listOf(big, mid, hevc, thumb).firstNotNullOfOrNull { ChatImageRepository.extractImageHash(it) }
+            val msgId = values.getAsLong("msglocalid") ?: 0L
+            val msgSvrId = values.getAsLong("msgSvrId") ?: 0L
+            val whereId = if (whereArgs != null && whereArgs.isNotEmpty() && whereClause != null) {
+                whereArgs[0].toLongOrNull() ?: 0L
+            } else {
+                0L
             }
+            val effMsgId = if (msgId > 0L) msgId else if (whereClause?.contains("msglocalid", true) == true) whereId else 0L
+            val effSvrId = if (msgSvrId > 0L) msgSvrId else if (whereClause?.contains("msgSvrId", true) == true) whereId else 0L
+            val imgRowId = if (whereClause != null && imgRowIdWhereRegex.containsMatchIn(whereClause)) whereId else 0L
+            if (effMsgId <= 0L && effSvrId <= 0L && imgRowId <= 0L && hash == null) return
+
+            // Delay slightly because updateWithOnConflict fires before SQLite commits / file write flushes.
+            imgSyncExecutor.schedule({
+                runCatching { refreshSessionImageFromIds(effMsgId, effSvrId, imgRowId, hash) }
+            }, 400L, TimeUnit.MILLISECONDS)
+        }
+    }
+
+    private fun refreshSessionImageFromIds(msgId: Long, msgSvrId: Long, imgRowId: Long = 0L, hash: String? = null) {
+        val record = when {
+            msgId > 0L || msgSvrId > 0L -> null
+            imgRowId > 0L -> ChatImageRepository.queryImageRecordById(imgRowId)
+            hash != null -> ChatImageRepository.queryBaseImageRecordByHash(hash)
+            else -> null
+        }
+        val qMsgId = if (msgId > 0L) msgId else (record?.msgLocalId ?: 0L)
+        val qSvrId = if (msgSvrId > 0L) msgSvrId else (record?.msgSvrId ?: 0L)
+        if (qMsgId <= 0L && qSvrId <= 0L) return
+
+        val row = (if (qMsgId > 0L) ChatRepository.queryMessageById(qMsgId) else null)
+            ?: (if (qSvrId > 0L) ChatRepository.queryMessageBySvrId(qSvrId) else null)
+            ?: return
+        val talker = row.getAsString("talker")?.trim().orEmpty()
+        if (talker.isEmpty() || !AgentSessionStore.hasExistingSession(talker)) return
+        val resolvedMsgId = row.getAsLong("msgId") ?: qMsgId
+        val resolvedSvrId = row.getAsLong("msgSvrId") ?: qSvrId
+        val imgPath = row.getAsString("imgPath").orEmpty()
+        val path = ChatImageRepository.resolveMessageImagePath(resolvedMsgId, resolvedSvrId, imgPath) ?: return
+        if (AgentSessionStore.updateImagePath(talker, resolvedMsgId, resolvedSvrId, path)) {
+            AcidAgentLoop.notifyExternalTimelineUpdate(talker)
         }
     }
 

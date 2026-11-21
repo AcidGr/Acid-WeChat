@@ -10,6 +10,7 @@ data class ToolPolicy(
     val currentTalker: String? = null,
     val allowSendMessage: Boolean = isAdmin && (currentTalker == null || currentTalker == AgentSessionModels.GLOBAL_TALKER),
     val allowedImagePaths: Set<String> = emptySet(),
+    val allowedImageHashes: Set<String> = emptySet(),
     val enabledTools: Set<String> = AgentConfigStore.ALL_TOOL_NAMES.toSet(),
     val allowGuestDrawImage: Boolean = false,
     val drawImageUsedInTurn: AtomicBoolean = AtomicBoolean(false),
