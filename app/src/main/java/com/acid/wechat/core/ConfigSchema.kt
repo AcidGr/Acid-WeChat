@@ -170,6 +170,11 @@ object ConfigSchema {
         "后台收到他人语音通知时等待短时转写并直接显示文字",
         dependsOn = AUTO_VOICE_TRANS.key,
     ))
+    val AUTO_VOICE_HOME_TRANS = register(BoolSpec(
+        "auto_voice_home_trans", true, FeatureCategory.CHAT, "语音增强", "主页语音转文字",
+        "微信主页会话列表的语音摘要直接显示转写文字",
+        dependsOn = AUTO_VOICE_TRANS.key,
+    ))
     val BLOCK_TYPING_STATUS = register(BoolSpec(
         "block_typing_status", false, FeatureCategory.CHAT, "输入状态", "禁止显示正在输入",
         "拦截聊天输入状态上报（兼容新旧协议），对方看不到「对方正在输入…」且不影响查看对方输入状态",

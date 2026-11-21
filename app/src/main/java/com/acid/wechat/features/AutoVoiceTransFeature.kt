@@ -9,6 +9,7 @@ import com.acid.wechat.core.ConfigStore
 import com.acid.wechat.core.FeatureOption
 import com.acid.wechat.core.FeatureRegistry
 import com.acid.wechat.wechat.ChatRepository
+import com.acid.wechat.wechat.VoiceHomeDigestBridge
 import com.acid.wechat.wechat.VoiceNotifyBridge
 import com.acid.wechat.wechat.VoiceTransBridge
 import org.json.JSONObject
@@ -35,6 +36,7 @@ object AutoVoiceTransFeature : AcidFeature {
         FeatureOption.from(ConfigSchema.AUTO_VOICE_TRANS_EXPAND),
         FeatureOption.from(ConfigSchema.AUTO_VOICE_CLEAR_REDDOT),
         FeatureOption.from(ConfigSchema.AUTO_VOICE_NOTIFY_TRANS),
+        FeatureOption.from(ConfigSchema.AUTO_VOICE_HOME_TRANS),
     )
 
     private val worker = Executors.newSingleThreadScheduledExecutor { r ->
@@ -64,6 +66,7 @@ object AutoVoiceTransFeature : AcidFeature {
     override fun registerDexRules() {
         VoiceTransBridge.registerDexRules()
         VoiceNotifyBridge.registerDexRules()
+        VoiceHomeDigestBridge.registerDexRules()
     }
 
     override fun onInit() {
@@ -82,6 +85,9 @@ object AutoVoiceTransFeature : AcidFeature {
         )
         VoiceNotifyBridge.init {
             FeatureRegistry.isEnabled(this) && ConfigStore.isEffective(ConfigSchema.AUTO_VOICE_NOTIFY_TRANS)
+        }
+        VoiceHomeDigestBridge.init {
+            FeatureRegistry.isEnabled(this) && ConfigStore.isEffective(ConfigSchema.AUTO_VOICE_HOME_TRANS)
         }
     }
 
@@ -120,6 +126,7 @@ object AutoVoiceTransFeature : AcidFeature {
             transcribedCount.incrementAndGet()
             FeatureRegistry.recordHit(id)
             VoiceNotifyBridge.onTranscriptReady(msgId, cachedText)
+            VoiceHomeDigestBridge.onTranscriptReady(row.talker, msgId, cachedText)
             applyPostTransActions(msgId, fileName)
             return
         }
@@ -155,6 +162,7 @@ object AutoVoiceTransFeature : AcidFeature {
                     cachedTranscriptCheck[task.msgId] = true
                     AcidLogger.i(TAG, "transcribed msgId=${task.msgId} talker=${task.talker} len=${text.length}")
                     VoiceNotifyBridge.onTranscriptReady(task.msgId, text)
+                    VoiceHomeDigestBridge.onTranscriptReady(task.talker, task.msgId, text)
                     applyPostTransActions(task.msgId, task.fileName)
                 } else {
                     failedCount.incrementAndGet()

@@ -102,6 +102,33 @@ object ChatRepository {
     fun hasVoiceTranscript(msgId: Long, fileName: String): Boolean =
         queryVoiceTranscript(msgId, fileName) != null
 
+    data class LatestVoiceState(
+        val msgId: Long,
+        val isVoice: Boolean,
+        val transcript: String?,
+    )
+
+    fun queryLatestVoiceState(talker: String): LatestVoiceState? = runCatching {
+        val cursor = WcdbBridge.rawQuery(
+            "SELECT msgId, msgSvrId, type, imgPath FROM message WHERE talker = ? ORDER BY createTime DESC LIMIT 1",
+            arrayOf(talker),
+        ) ?: return@runCatching null
+        cursor.use { c ->
+            if (!c.moveToFirst()) return@runCatching null
+            val msgId = c.getLong(0)
+            val msgSvrId = c.getLong(1)
+            val type = c.getInt(2)
+            if (type != 34) return@runCatching LatestVoiceState(msgId, isVoice = false, transcript = null)
+            val fileName = c.getString(3).orEmpty().ifBlank { queryVoiceFileName(msgId, msgSvrId).orEmpty() }
+            val transcript = if (fileName.isNotBlank()) {
+                queryVoiceTranscript(msgId, fileName)?.trim()?.takeIf { it.isNotEmpty() }
+            } else {
+                null
+            }
+            LatestVoiceState(msgId, isVoice = true, transcript = transcript)
+        }
+    }.getOrNull()
+
     fun queryMessageById(msgId: Long): ContentValues? =
         queryMessageRow("msgId = ?", arrayOf(msgId.toString()))
 
