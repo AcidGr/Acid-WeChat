@@ -54,8 +54,8 @@ object SendFileTool : AgentTool {
                 "as_type",
                 propEnum(
                     "string",
-                    "'auto' sends jpg/jpeg/png/webp/bmp as image bubble and other files as file card; 'image' forces image bubble; 'file' forces file card.",
-                    listOf("auto", "image", "file"),
+                    "'auto' sends jpg/jpeg/png/webp/bmp as image bubble and other files as file card; 'image' forces image bubble; 'file' forces file card; 'voice' converts audio (mp3/wav/m4a/ogg/flac/silk) to a WeChat voice bubble.",
+                    listOf("auto", "image", "file", "voice"),
                 ),
             )
             put("raw_image", prop("boolean", "Send original uncompressed image when sending an image bubble (default false)."))
@@ -96,23 +96,32 @@ object SendFileTool : AgentTool {
         val rawImage = args.optBoolean("raw_image", false)
         val customTitle = args.optString("title", "").trim().ifEmpty { null }
         val isImageExt = file.extension.lowercase() in IMAGE_EXTS
-        val wantImage = when (asType) {
+        val wantVoice = asType == "voice"
+        val wantImage = !wantVoice && when (asType) {
             "image" -> true
             "file" -> false
             else -> isImageExt
         }
 
         val displayFileName = customTitle ?: file.name
-        var actualMode = if (wantImage) "image" else "file"
-        var sendRes = if (wantImage) {
-            val token = AgentSentTracker.markSentMedia(targetTalker, AgentSentTracker.MediaKind.IMAGE, file.name)
-            WeChatSender.sendImage(targetTalker, file, rawImage).also { res ->
-                if (!res.ok) AgentSentTracker.cancelSentMedia(targetTalker, token)
+        var actualMode = when {
+            wantVoice -> "voice"
+            wantImage -> "image"
+            else -> "file"
+        }
+        var sendRes = when {
+            wantVoice -> WeChatSender.sendVoice(targetTalker, file)
+            wantImage -> {
+                val token = AgentSentTracker.markSentMedia(targetTalker, AgentSentTracker.MediaKind.IMAGE, file.name)
+                WeChatSender.sendImage(targetTalker, file, rawImage).also { res ->
+                    if (!res.ok) AgentSentTracker.cancelSentMedia(targetTalker, token)
+                }
             }
-        } else {
-            val token = AgentSentTracker.markSentMedia(targetTalker, AgentSentTracker.MediaKind.FILE, displayFileName)
-            WeChatSender.sendFile(targetTalker, file, customTitle).also { res ->
-                if (!res.ok) AgentSentTracker.cancelSentMedia(targetTalker, token)
+            else -> {
+                val token = AgentSentTracker.markSentMedia(targetTalker, AgentSentTracker.MediaKind.FILE, displayFileName)
+                WeChatSender.sendFile(targetTalker, file, customTitle).also { res ->
+                    if (!res.ok) AgentSentTracker.cancelSentMedia(targetTalker, token)
+                }
             }
         }
 

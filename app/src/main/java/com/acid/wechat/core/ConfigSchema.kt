@@ -175,6 +175,10 @@ object ConfigSchema {
         "微信主页会话列表的语音摘要直接显示转写文字",
         dependsOn = AUTO_VOICE_TRANS.key,
     ))
+    val VOICE_FILE_SEND_ENABLED = register(BoolSpec(
+        "voice_file_send_enabled", true, FeatureCategory.CHAT, "语音增强", "MP3 转语音发送",
+        "在聊天「+」面板添加「MP3语音」按钮（同时支持长按左下角语音图标），选择本地音频后转码为微信语音发送",
+    ))
     val BLOCK_TYPING_STATUS = register(BoolSpec(
         "block_typing_status", false, FeatureCategory.CHAT, "输入状态", "禁止显示正在输入",
         "拦截聊天输入状态上报（兼容新旧协议），对方看不到「对方正在输入…」且不影响查看对方输入状态",

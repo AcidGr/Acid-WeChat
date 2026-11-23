@@ -17,6 +17,7 @@ import java.lang.ref.WeakReference
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Injects an "AI" button to the left of the top-right "..." (chat info) menu button
@@ -32,6 +33,11 @@ object ChatHeaderAiHook {
     private lateinit var ruleChattingCtxGetTalker: DexKitLocator.DexRule
     private lateinit var ruleChattingCtxGetNick: DexKitLocator.DexRule
 
+    private val rulesRegistered = AtomicBoolean(false)
+    private val hookInstalled = AtomicBoolean(false)
+
+    @Volatile private var aiEnabledProvider: () -> Boolean = { false }
+
     @Volatile private var ctxFieldOnHeader: Field? = null
     @Volatile private var fragmentFieldOnCtx: Field? = null
     @Volatile private var findMenuInfoMethod: Method? = null
@@ -45,10 +51,13 @@ object ChatHeaderAiHook {
     @Volatile private var menuInfoStyleField: Field? = null
     @Volatile private var getTalkerMethodRef: Method? = null
 
+    @Volatile private var getNickMethodRef: Method? = null
+
     private val latestCtxByFragment = ConcurrentHashMap<Int, WeakReference<Any>>()
     private val latestFragments = ConcurrentHashMap<Int, WeakReference<Any>>()
 
     fun registerDexRules() {
+        if (!rulesRegistered.compareAndSet(false, true)) return
         ruleHeaderUpdateMenu = DexKitLocator.registerMethod(
             id = "chat_header_update_menu_v1",
             description = "HeaderComponent.updateMenuItem() in ChattingUI",
@@ -88,6 +97,33 @@ object ChatHeaderAiHook {
     }
 
     fun init(isFeatureEnabled: () -> Boolean) {
+        aiEnabledProvider = isFeatureEnabled
+        ensureHookInstalled()
+    }
+
+    fun ensureContextTracking() {
+        ensureHookInstalled()
+    }
+
+    fun resolveLiveTalker(activity: Activity): Pair<String, String>? {
+        val getTalker = getTalkerMethodRef ?: return null
+        val getNick = getNickMethodRef
+        for ((fragKey, fragRef) in latestFragments.entries) {
+            val fragment = fragRef.get() ?: continue
+            if (resolveFragmentActivity(fragment) !== activity) continue
+            val ctx = latestCtxByFragment[fragKey]?.get() ?: continue
+            val talker = runCatching { (getTalker.invoke(ctx) as? String)?.trim().orEmpty() }.getOrDefault("")
+            if (talker.isNotEmpty()) {
+                val nick = runCatching { (getNick?.invoke(ctx) as? String)?.trim() }.getOrNull()
+                val title = nick?.takeIf { it.isNotEmpty() } ?: ChatRepository.resolveChatTitle(talker)
+                return talker to title
+            }
+        }
+        return null
+    }
+
+    private fun ensureHookInstalled() {
+        if (!hookInstalled.compareAndSet(false, true)) return
         val updateMenuMethod = ruleHeaderUpdateMenu.resolveMethod()
         val getTalkerMethod = ruleChattingCtxGetTalker.resolveMethod()
         val getNickMethod = ruleChattingCtxGetNick.resolveMethod()
@@ -96,6 +132,7 @@ object ChatHeaderAiHook {
             return
         }
         getTalkerMethodRef = getTalkerMethod
+        getNickMethodRef = getNickMethod
 
         val ctxCls = getTalkerMethod.declaringClass
         ctxFieldOnHeader = findFieldByType(updateMenuMethod.declaringClass, ctxCls)
@@ -123,14 +160,10 @@ object ChatHeaderAiHook {
                         if (talker.isEmpty()) return
 
                         ensureFragmentMenuMethods(fragment.javaClass)
-                        if (!isFeatureEnabled()) {
-                            removeAiMenuIfPresent(fragment)
-                            return
-                        }
                         val hasMoreMenu = findMenuInfoMethod?.invoke(fragment, 0) != null
-                        val hasAiMenu = findMenuInfoMethod?.invoke(fragment, AI_MENU_ID) != null
-                        // Register AI before WeChat inserts menuId=0 ("...") so AI renders to its left.
-                        if (!hasMoreMenu && !hasAiMenu) {
+                        if (!aiEnabledProvider()) {
+                            removeMenuIfPresent(fragment, AI_MENU_ID)
+                        } else if (!hasMoreMenu && findMenuInfoMethod?.invoke(fragment, AI_MENU_ID) == null) {
                             addAiMenu(fragment, ctx, talker, getTalkerMethod, getNickMethod)
                         }
                     }
@@ -138,7 +171,6 @@ object ChatHeaderAiHook {
 
                 override fun afterHookedMethod(param: MethodHookParam) {
                     runCatching {
-                        if (!isFeatureEnabled()) return
                         val header = param.thisObject ?: return
                         val ctx = ctxFieldOnHeader?.get(header) ?: return
                         val fragment = fragmentFieldOnCtx?.get(ctx) ?: return
@@ -150,15 +182,19 @@ object ChatHeaderAiHook {
                         if (talker.isEmpty()) return
 
                         ensureFragmentMenuMethods(fragment.javaClass)
-                        if (findMenuInfoMethod?.invoke(fragment, AI_MENU_ID) == null) {
-                            addAiMenu(fragment, ctx, talker, getTalkerMethod, getNickMethod)
+                        if (aiEnabledProvider()) {
+                            if (findMenuInfoMethod?.invoke(fragment, AI_MENU_ID) == null) {
+                                addAiMenu(fragment, ctx, talker, getTalkerMethod, getNickMethod)
+                            } else {
+                                applyMenuVisual(fragment, talker, forceInvalidate = false)
+                            }
                         } else {
-                            applyMenuVisual(fragment, talker, forceInvalidate = false)
+                            removeMenuIfPresent(fragment, AI_MENU_ID)
                         }
                     }
                 }
             })
-            AcidLogger.i(TAG, "hooked ${updateMenuMethod.declaringClass.name}.${updateMenuMethod.name} for Chat AI button")
+            AcidLogger.i(TAG, "hooked ${updateMenuMethod.declaringClass.name}.${updateMenuMethod.name} for Chat header buttons")
         }.onFailure {
             AcidLogger.w(TAG, "failed hooking ChattingUI header updateMenuItem", it)
         }
@@ -265,9 +301,9 @@ object ChatHeaderAiHook {
         return null
     }
 
-    private fun removeAiMenuIfPresent(fragment: Any) {
-        if (findMenuInfoMethod?.invoke(fragment, AI_MENU_ID) != null) {
-            removeOptionMenuMethod?.invoke(fragment, AI_MENU_ID)
+    private fun removeMenuIfPresent(fragment: Any, menuId: Int) {
+        if (findMenuInfoMethod?.invoke(fragment, menuId) != null) {
+            removeOptionMenuMethod?.invoke(fragment, menuId)
         }
     }
 

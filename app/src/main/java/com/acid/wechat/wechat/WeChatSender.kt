@@ -147,9 +147,11 @@ object WeChatSender {
                 }
             }
         }
+        WeChatVoiceSender.registerDexRules()
     }
 
     fun init() {
+        WeChatVoiceSender.init()
         val enqueueMethod = if (::ruleQueueEnqueue.isInitialized) ruleQueueEnqueue.resolveMethod() else null
         val queueCls = enqueueMethod?.declaringClass
             ?: if (::ruleQueueClass.isInitialized) ruleQueueClass.resolveClass() else null
@@ -331,7 +333,35 @@ object WeChatSender {
         }
     }
 
-    private fun runOnMainLooper(block: () -> SendResult): SendResult {
+    fun sendVoice(talker: String, audioFile: File, durationMsOverride: Int? = null): SendResult =
+        WeChatVoiceSender.sendVoice(talker, audioFile, durationMsOverride)
+
+    internal fun dispatchNetScene(scene: Any): SendResult {
+        val enqueueMethod = capturedEnqueueMethod
+            ?: (if (::ruleQueueEnqueue.isInitialized) ruleQueueEnqueue.resolveMethod() else null)
+            ?: return recordFailure("NetSceneQueue enqueue method not resolved (check /dexkit)")
+        val queue = capturedQueue
+            ?: return recordFailure("NetSceneQueue instance not yet captured; trigger any WeChat action first")
+
+        return runOnMainLooper {
+            runCatching {
+                val dispatched = invokeEnqueue(enqueueMethod, queue, scene)
+                if (dispatched) {
+                    sentCount.incrementAndGet()
+                    lastError = ""
+                    SendResult(true, "dispatched via ${enqueueMethod.declaringClass.simpleName}.${enqueueMethod.name}")
+                } else {
+                    recordFailure("${enqueueMethod.declaringClass.simpleName}.${enqueueMethod.name} returned false")
+                }
+            }.onFailure {
+                AcidLogger.w(TAG, "dispatchNetScene failed", it)
+            }.getOrElse { err ->
+                recordFailure("${err.javaClass.simpleName}: ${err.message}")
+            }
+        }
+    }
+
+    internal fun runOnMainLooper(block: () -> SendResult): SendResult {
         if (Looper.myLooper() == Looper.getMainLooper()) {
             return block()
         }
@@ -375,6 +405,7 @@ object WeChatSender {
         put("serviceManagerReady", ::ruleServiceManagerGet.isInitialized && ruleServiceManagerGet.resolveMethod() != null)
         put("sendImgReady", ::ruleSendImgMethod.isInitialized && ruleSendImgMethod.resolveMethod() != null)
         put("sendAppMsgReady", ::ruleSendAppMsgMethod.isInitialized && ruleSendAppMsgMethod.resolveMethod() != null)
+        put("voice", WeChatVoiceSender.statusJson())
         put("sentCount", sentCount.get())
         put("lastError", lastError)
     }

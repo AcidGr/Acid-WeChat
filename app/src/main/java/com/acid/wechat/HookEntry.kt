@@ -23,6 +23,7 @@ import com.acid.wechat.features.FakeSnsLikeFeature
 import com.acid.wechat.features.ForceTabletModeFeature
 import com.acid.wechat.features.SavePathFeature
 import com.acid.wechat.features.SnsTailFeature
+import com.acid.wechat.features.VoiceFileSendFeature
 import com.acid.wechat.ui.HomeHeaderAiHook
 import com.acid.wechat.ui.SettingsHook
 import com.acid.wechat.wechat.WeChatImageDownloader
@@ -120,6 +121,7 @@ class HookEntry : IXposedHookZygoteInit, IXposedHookLoadPackage {
             FeatureRegistry.register(AntiRecallFeature)
             FeatureRegistry.register(CustomGameEmojiFeature)
             FeatureRegistry.register(AutoVoiceTransFeature)
+            FeatureRegistry.register(VoiceFileSendFeature)
             FeatureRegistry.register(BlockTypingStatusFeature)
             FeatureRegistry.register(ChatAgentFeature)
             FeatureRegistry.register(AntiMomentsPostFeature)
